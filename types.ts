@@ -6,25 +6,39 @@ export interface User {
   pin: string;
 }
 
+export interface ShipmentDetails {
+  status: string;
+  carrier: string; // 'UPS'
+  date: string; // Formatted MM/DD/YYYY
+  location: string;
+  delivered: boolean;
+  trackingUrl: string;
+  expectedDelivery: string;
+  lastUpdated: number;
+  error?: string;
+}
+
 export interface PackageLog {
   id: string;
   trackingId: string;
-  userId: string; // New field for user attribution
-  startTime: number; // Timestamp in ms
-  endTime: number | null; // Timestamp in ms, null if active
-  dateStr: string; // YYYY-MM-DD for grouping
+  userId: string; 
+  startTime: number; 
+  endTime: number | null; 
+  dateStr: string; 
+  shipmentDetails?: ShipmentDetails;
 }
 
 export interface DaySummary {
   dateStr: string;
   totalPackages: number;
   avgDurationMinutes: number;
-  totalShiftDuration: number; // ms
+  totalShiftDuration: number; 
 }
 
 export enum Tab {
   TRACKER = 'TRACKER',
   HISTORY = 'HISTORY',
   ANALYTICS = 'ANALYTICS',
+  SHIPMENT = 'SHIPMENT',
   CONFIGURATION = 'CONFIGURATION'
 }

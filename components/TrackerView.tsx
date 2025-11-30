@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { PackageLog, User, Tab } from '../types';
-import { formatDuration, formatTime, getDurationColor, calculateShiftStats, formatDate } from '../utils';
+import { formatDuration, formatDurationHours, formatTime, getDurationColor, calculateShiftStats, formatDate, getLocalDateStr } from '../utils';
 import { addLogEntry, clockOutActiveLog, autoTimeoutLog, deleteLogEntry } from '../firebase';
-import { Play, Square, Clock, Package, User as UserIcon, Lock, ArrowRight, Trash2 } from 'lucide-react';
+import { Play, Square, Clock, Package, User as UserIcon, Lock, ArrowRight, Trash2, Loader2 } from 'lucide-react';
 
 interface TrackerViewProps {
   logs: PackageLog[];
@@ -10,6 +11,7 @@ interface TrackerViewProps {
   users: User[];
   setActiveTab: (tab: Tab) => void;
   requestConfirm: (message: string, onConfirm: () => void) => void;
+  loginTimestamp?: number;
 }
 
 export const TrackerView: React.FC<TrackerViewProps> = ({ 
@@ -17,10 +19,12 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
   currentUser, 
   users, 
   setActiveTab,
-  requestConfirm 
+  requestConfirm,
+  loginTimestamp
 }) => {
   const [inputValue, setInputValue] = useState('');
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [isSaving, setIsSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Auto-clock out limit: 30 Minutes in milliseconds
@@ -44,9 +48,17 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
     return () => clearInterval(timer);
   }, [logs, AUTO_TIMEOUT_MS]);
 
-  // Filter logs for Today
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todaysLogs = logs.filter(l => l.dateStr === todayStr).sort((a, b) => b.startTime - a.startTime);
+  // Use getLocalDateStr helper to ensure we use local machine time, not UTC
+  const todayStr = getLocalDateStr();
+  
+  // 1. Filter logs to show only those with today's date string
+  // 2. AND check if the startTime is actually > midnight today local time to catch edge cases
+  const startOfToday = new Date();
+  startOfToday.setHours(0,0,0,0);
+  
+  const todaysLogs = logs
+    .filter(l => l.startTime >= startOfToday.getTime())
+    .sort((a, b) => b.startTime - a.startTime);
   
   // Calculate stats ONLY for the current user to show their personal daily progress
   const currentUserTodaysLogs = currentUser 
@@ -54,6 +66,17 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
     : [];
     
   const userStats = calculateShiftStats(currentUserTodaysLogs);
+  
+  // Custom Shift Start Logic:
+  // If no logs, shift hasn't started.
+  // If logs exist, shift start is the EARLIER of (Login Time) or (First Scan Time)
+  let adjustedShiftDuration = 0;
+  if (currentUserTodaysLogs.length > 0) {
+      const firstScanTime = Math.min(...currentUserTodaysLogs.map(l => l.startTime));
+      const effectiveStartTime = loginTimestamp ? Math.min(loginTimestamp, firstScanTime) : firstScanTime;
+      const lastActivityTime = Math.max(...currentUserTodaysLogs.map(l => l.endTime || currentTime));
+      adjustedShiftDuration = lastActivityTime - effectiveStartTime;
+  }
 
   // Find ANY active log (could be another user if they forgot to clock out)
   const activeLog = todaysLogs.find(l => l.endTime === null);
@@ -62,17 +85,27 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
     e.preventDefault();
     if (!inputValue.trim() || !currentUser) return;
 
-    const now = Date.now();
-    // Fire and forget - the listener in App.tsx will update the UI when DB changes
-    await addLogEntry({
-      trackingId: inputValue.trim(),
-      userId: currentUser.id,
-      startTime: now,
-      endTime: null,
-      dateStr: todayStr,
-    });
+    setIsSaving(true);
+    
+    try {
+      const now = Date.now();
+      await addLogEntry({
+        trackingId: inputValue.trim(),
+        userId: currentUser.id,
+        startTime: now,
+        endTime: null,
+        dateStr: todayStr
+      });
 
-    setInputValue('');
+      setInputValue('');
+    } catch (error) {
+      console.error("Error creating log:", error);
+      alert("Failed to create log. Please try again.");
+    } finally {
+      setIsSaving(false);
+      // Keep focus on input
+      if (inputRef.current) inputRef.current.focus();
+    }
   };
 
   const handleClockOutAll = () => {
@@ -133,18 +166,30 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
                 ref={inputRef}
                 autoFocus
                 type="text"
-                className="block w-full pl-10 pr-3 py-3 border border-slate-300 rounded-lg leading-5 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-lg"
+                disabled={isSaving}
+                className="block w-full pl-10 pr-3 py-3 border border-slate-300 rounded-lg leading-5 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-lg disabled:bg-slate-50"
                 placeholder="Scanner ready..."
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
               />
             </div>
+            
             <button
               type="submit"
-              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition duration-150 ease-in-out flex items-center gap-2"
+              disabled={isSaving}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold py-3 px-6 rounded-lg transition duration-150 ease-in-out flex items-center gap-2 min-w-[120px] justify-center"
             >
-              <Play className="w-5 h-5" />
-              <span>Start</span>
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-5 h-5" />
+                  <span>Start</span>
+                </>
+              )}
             </button>
           </form>
           
@@ -175,7 +220,7 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
               <span className="w-2 h-2 rounded-full bg-green-400"></span>
               {currentUser.name}'s Shift
             </h3>
-            <p className="text-3xl font-bold font-mono">{formatDuration(userStats.shiftDuration)}</p>
+            <p className="text-3xl font-bold font-mono">{formatDurationHours(adjustedShiftDuration)}</p>
           </div>
           <div className="mt-4 pt-4 border-t border-slate-600 grid grid-cols-2 gap-4 relative z-10">
             <div>
@@ -253,14 +298,16 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
                          {getUserName(log.userId)}
                        </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{formatDate(log.dateStr)}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{log.trackingId}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                        {log.trackingId}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-mono">{formatTime(log.startTime)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-mono">
                         {log.endTime ? formatTime(log.endTime) : '-'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-mono">
-                        <span className={`px-2 py-1 rounded-md text-xs font-bold border ${getDurationColor(duration)}`}>
-                          {formatDuration(duration)}
+                        <span className={`px-3 py-1.5 rounded-md text-base font-bold border ${getDurationColor(duration)}`}>
+                          {formatDurationHours(duration) === '0m' ? formatDuration(duration) : formatDurationHours(duration)}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm flex justify-end gap-2 items-center">

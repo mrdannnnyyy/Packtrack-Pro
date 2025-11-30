@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { PackageLog, User } from '../types';
 import { formatTime, formatDuration, formatDate, getDurationColor } from '../utils';
@@ -233,7 +234,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ logs, users, requestCo
                                <span className="font-medium">{getUserName(log.userId)}</span>
                              </div>
                           </td>
-                          <td className="px-6 py-3 text-sm text-slate-800 font-bold font-mono whitespace-nowrap">{log.trackingId}</td>
+                          <td className="px-6 py-3 text-sm text-slate-800 font-bold font-mono whitespace-nowrap">
+                            {log.trackingId}
+                          </td>
                           <td className="px-6 py-3 text-sm text-slate-500 font-mono whitespace-nowrap">
                             {formatTime(log.startTime)} <span className="text-slate-300 mx-1">→</span> {log.endTime ? formatTime(log.endTime) : '...'}
                           </td>

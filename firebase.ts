@@ -1,33 +1,38 @@
-import firebase from "firebase/compat/app";
-import "firebase/compat/firestore";
-import { PackageLog, User } from './types';
+
+import { initializeApp } from "firebase/app";
+import { 
+  getFirestore, 
+  collection, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  query, 
+  where, 
+  getDocs, 
+  writeBatch
+} from "firebase/firestore";
+import { PackageLog, User, ShipmentDetails } from './types';
 
 // --- CONFIGURATION ---
 const firebaseConfig = {
-  apiKey: "AIzaSyCtzgOR0BQO2F8Pidf_RjdwzmO10RHWnkk",
-  authDomain: "timetrackingapp-c8324.firebaseapp.com",
-  projectId: "timetrackingapp-c8324",
-  storageBucket: "timetrackingapp-c8324.firebasestorage.app",
-  messagingSenderId: "314302007648",
-  appId: "1:314302007648:web:7c8c6faa45384e11f5f605"
+  apiKey: "AIzaSyAKbvODxE_ULiag9XBXHnAJO4b-tGWSq0w",
+  authDomain: "time-tracking-67712.firebaseapp.com",
+  databaseURL: "https://time-tracking-67712-default-rtdb.firebaseio.com",
+  projectId: "time-tracking-67712",
+  storageBucket: "time-tracking-67712.firebasestorage.app",
+  messagingSenderId: "829274875816",
+  appId: "1:829274875816:web:ee9e8046d22a115e42df9d"
 };
 
 // Initialize Firebase
-const app = firebase.initializeApp(firebaseConfig);
+const app = initializeApp(firebaseConfig);
 
 // Initialize Firestore
-const db = app.firestore();
+const db = getFirestore(app);
 
-// Enable Offline Persistence
-// We swallow errors here because some environments (like private tabs) don't support IDB
-db.enablePersistence().catch((err) => {
-  if (err.code == 'failed-precondition') {
-      console.warn("Firestore persistence failed: Multiple tabs open");
-  } else if (err.code == 'unimplemented') {
-      console.warn("Firestore persistence not supported in this browser");
-  }
-});
-
+// NOTE: Offline persistence disabled
 // Collection References
 const LOGS_COL = 'packtrack_logs';
 const USERS_COL = 'packtrack_users';
@@ -38,8 +43,9 @@ export const subscribeToLogs = (
   onData: (logs: PackageLog[]) => void, 
   onError?: (error: any) => void
 ) => {
-  const q = db.collection(LOGS_COL);
-  return q.onSnapshot(
+  const q = collection(db, LOGS_COL);
+  return onSnapshot(
+    q,
     (snapshot) => {
       const logs = snapshot.docs.map(doc => ({
         ...doc.data(),
@@ -58,8 +64,9 @@ export const subscribeToUsers = (
   onData: (users: User[]) => void, 
   onError?: (error: any) => void
 ) => {
-  const q = db.collection(USERS_COL);
-  return q.onSnapshot(
+  const q = collection(db, USERS_COL);
+  return onSnapshot(
+    q,
     (snapshot) => {
       const users = snapshot.docs.map(doc => ({
         ...doc.data(),
@@ -77,57 +84,58 @@ export const subscribeToUsers = (
 // --- LOG OPERATIONS ---
 
 export const addLogEntry = async (log: Omit<PackageLog, 'id'>) => {
-  // 1. Find any active logs and clock them out first
-  // We query for logs where endTime is null
-  const logsRef = db.collection(LOGS_COL);
-  const snapshot = await logsRef.where("endTime", "==", null).get();
+  const logsRef = collection(db, LOGS_COL);
+  const q = query(logsRef, where("endTime", "==", null));
+  const snapshot = await getDocs(q);
   
-  const batch = db.batch();
+  const batch = writeBatch(db);
   let hasUpdates = false;
 
-  if (!snapshot.empty) {
-    snapshot.docs.forEach(activeDoc => {
-      batch.update(activeDoc.ref, { endTime: Date.now() });
-      hasUpdates = true;
-    });
-  }
+  snapshot.docs.forEach((docSnap) => {
+    batch.update(docSnap.ref, { endTime: Date.now() });
+    hasUpdates = true;
+  });
 
-  // 2. Add the new log
-  // We can add the new doc in the same batch or separately. 
-  // Firestore batches are for writes/deletes/updates, addDoc returns a Ref, so we usually do it after.
   if (hasUpdates) {
     await batch.commit();
   }
 
-  await logsRef.add(log);
+  await addDoc(logsRef, log);
 };
 
 export const clockOutActiveLog = async (logId: string) => {
-  const logRef = db.collection(LOGS_COL).doc(logId);
-  await logRef.update({
+  const logRef = doc(db, LOGS_COL, logId);
+  await updateDoc(logRef, {
     endTime: Date.now()
   });
 };
 
 export const autoTimeoutLog = async (logId: string, startTime: number, timeoutDuration: number) => {
-  const logRef = db.collection(LOGS_COL).doc(logId);
-  await logRef.update({
+  const logRef = doc(db, LOGS_COL, logId);
+  await updateDoc(logRef, {
     endTime: startTime + timeoutDuration
   });
 };
 
+export const updateLogShipmentDetails = async (logId: string, details: ShipmentDetails) => {
+  const logRef = doc(db, LOGS_COL, logId);
+  await updateDoc(logRef, {
+    shipmentDetails: details
+  });
+};
+
 export const deleteLogEntry = async (logId: string) => {
-  const logRef = db.collection(LOGS_COL).doc(logId);
-  await logRef.delete();
+  const logRef = doc(db, LOGS_COL, logId);
+  await deleteDoc(logRef);
 };
 
 export const clearAllSystemData = async () => {
-  const batch = db.batch();
+  const batch = writeBatch(db);
   
-  const logsSnap = await db.collection(LOGS_COL).get();
+  const logsSnap = await getDocs(collection(db, LOGS_COL));
   logsSnap.forEach(d => batch.delete(d.ref));
   
-  const usersSnap = await db.collection(USERS_COL).get();
+  const usersSnap = await getDocs(collection(db, USERS_COL));
   usersSnap.forEach(d => batch.delete(d.ref));
   
   await batch.commit();
@@ -136,15 +144,15 @@ export const clearAllSystemData = async () => {
 // --- USER OPERATIONS ---
 
 export const addUser = async (user: Omit<User, 'id'>) => {
-  await db.collection(USERS_COL).add(user);
+  await addDoc(collection(db, USERS_COL), user);
 };
 
 export const updateUser = async (userId: string, data: Partial<User>) => {
-  const userRef = db.collection(USERS_COL).doc(userId);
-  await userRef.update(data);
+  const userRef = doc(db, USERS_COL, userId);
+  await updateDoc(userRef, data);
 };
 
 export const deleteUser = async (userId: string) => {
-  const userRef = db.collection(USERS_COL).doc(userId);
-  await userRef.delete();
+  const userRef = doc(db, USERS_COL, userId);
+  await deleteDoc(userRef);
 };

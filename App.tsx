@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { PackageLog, Tab, User } from './types';
 import { TrackerView } from './components/TrackerView';
@@ -5,8 +6,9 @@ import { AnalyticsView } from './components/AnalyticsView';
 import { HistoryView } from './components/HistoryView';
 import { ConfigurationView } from './components/ConfigurationView';
 import { LoginView } from './components/LoginView';
+import { ShipmentTrackingView } from './components/ShipmentTrackingView';
 import { subscribeToLogs, subscribeToUsers, clearAllSystemData } from './firebase'; // Import Firestore logic
-import { Box, BarChart3, History, LayoutDashboard, Settings, LogOut, X, PanelLeftClose, PanelLeftOpen, Shield, AlertTriangle, Database, Lock } from 'lucide-react';
+import { Box, BarChart3, History, LayoutDashboard, Settings, LogOut, X, PanelLeftClose, PanelLeftOpen, Shield, AlertTriangle, Database, Lock, Truck } from 'lucide-react';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>(Tab.TRACKER);
@@ -15,6 +17,7 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loginTimestamp, setLoginTimestamp] = useState<number | undefined>(undefined);
   
   // UI States
   const [isSidebarOpen, setIsSidebarOpen] = useState(typeof window !== 'undefined' ? window.innerWidth >= 768 : true);
@@ -94,6 +97,7 @@ const App: React.FC = () => {
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
+    setLoginTimestamp(Date.now());
     setIsAuthenticated(true);
     setActiveTab(Tab.TRACKER); // Always start at tracker
   };
@@ -101,6 +105,7 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setCurrentUser(null);
     setIsAuthenticated(false);
+    setLoginTimestamp(undefined);
     setIsSidebarOpen(true); // Reset sidebar for next login
   };
 
@@ -137,9 +142,6 @@ service cloud.firestore {
   }
 }`}</pre>
             </div>
-            <p className="text-sm text-slate-500 italic mt-2">
-              * Since this app uses a custom PIN system instead of Firebase Auth, these rules are required to allow the app to function.
-            </p>
           </div>
 
           <button 
@@ -281,6 +283,16 @@ service cloud.firestore {
               </button>
 
               <button
+                onClick={() => handleNavClick(Tab.SHIPMENT)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
+                  activeTab === Tab.SHIPMENT ? 'bg-blue-600 text-white shadow-lg translate-x-1' : 'hover:bg-slate-800 hover:translate-x-1'
+                }`}
+              >
+                <Truck className="w-5 h-5" />
+                <span className="font-medium">Shipment Tracking</span>
+              </button>
+
+              <button
                 onClick={() => handleNavClick(Tab.CONFIGURATION)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
                   activeTab === Tab.CONFIGURATION ? 'bg-blue-600 text-white shadow-lg translate-x-1' : 'hover:bg-slate-800 hover:translate-x-1'
@@ -332,6 +344,7 @@ service cloud.firestore {
               {activeTab === Tab.TRACKER && "Daily Tracker"}
               {activeTab === Tab.ANALYTICS && "Performance Analytics"}
               {activeTab === Tab.HISTORY && "Detailed History"}
+              {activeTab === Tab.SHIPMENT && "Shipment Tracking"}
               {activeTab === Tab.CONFIGURATION && "Configuration"}
             </h2>
             
@@ -354,6 +367,7 @@ service cloud.firestore {
               users={users} 
               setActiveTab={setActiveTab}
               requestConfirm={requestConfirm}
+              loginTimestamp={loginTimestamp}
             />
           )}
           {activeTab === Tab.ANALYTICS && currentUser?.role === 'ADMIN' && (
@@ -365,6 +379,9 @@ service cloud.firestore {
               users={users} 
               requestConfirm={requestConfirm} 
             />
+          )}
+          {activeTab === Tab.SHIPMENT && currentUser?.role === 'ADMIN' && (
+             <ShipmentTrackingView logs={logs} />
           )}
           {activeTab === Tab.CONFIGURATION && currentUser?.role === 'ADMIN' && (
             <ConfigurationView 
