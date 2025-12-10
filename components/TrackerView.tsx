@@ -28,7 +28,7 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Auto-clock out limit: 30 Minutes in milliseconds
-  const AUTO_TIMEOUT_MS = 30 * 60 * 1000;
+  const AUTO_TIMEOUT_MS = 60 * 60 * 1000;
 
   // Update timer every second for UI and check for timeouts
   useEffect(() => {
@@ -103,8 +103,12 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
       alert("Failed to create log. Please try again.");
     } finally {
       setIsSaving(false);
-      // Keep focus on input
-      if (inputRef.current) inputRef.current.focus();
+      // Use setTimeout to ensure the input is re-enabled in the DOM before focusing
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      }, 10);
     }
   };
 

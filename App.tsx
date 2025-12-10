@@ -6,9 +6,10 @@ import { AnalyticsView } from './components/AnalyticsView';
 import { HistoryView } from './components/HistoryView';
 import { ConfigurationView } from './components/ConfigurationView';
 import { LoginView } from './components/LoginView';
-import { ShipmentTrackingView } from './components/ShipmentTrackingView';
-import { subscribeToLogs, subscribeToUsers, clearAllSystemData } from './firebase'; // Import Firestore logic
-import { Box, BarChart3, History, LayoutDashboard, Settings, LogOut, X, PanelLeftClose, PanelLeftOpen, Shield, AlertTriangle, Database, Lock, Truck } from 'lucide-react';
+import { OrderDetailsView } from './components/OrderDetailsView';
+import { PackageTrackingView } from './components/PackageTrackingView';
+import { subscribeToLogs, subscribeToUsers, clearAllSystemData } from './firebase'; 
+import { Box, BarChart3, History, LayoutDashboard, Settings, LogOut, X, PanelLeftClose, PanelLeftOpen, Shield, AlertTriangle, Database, Lock, Truck, ShoppingBag } from 'lucide-react';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>(Tab.TRACKER);
@@ -19,21 +20,16 @@ const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loginTimestamp, setLoginTimestamp] = useState<number | undefined>(undefined);
   
-  // UI States
   const [isSidebarOpen, setIsSidebarOpen] = useState(typeof window !== 'undefined' ? window.innerWidth >= 768 : true);
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; message: string; onConfirm: () => void } | null>(null);
   const [dbError, setDbError] = useState<string | null>(null);
 
-  // --- FIRESTORE SYNC ---
   useEffect(() => {
-    // Subscribe to Users
     const unsubscribeUsers = subscribeToUsers(
       (fetchedUsers) => {
         setUsers(fetchedUsers);
         setIsLoaded(true);
         setDbError(null);
-        
-        // Update current user object if their data changes in DB while logged in
         if (currentUser) {
           const updatedMe = fetchedUsers.find(u => u.id === currentUser.id);
           if (updatedMe) setCurrentUser(updatedMe);
@@ -48,7 +44,6 @@ const App: React.FC = () => {
       }
     );
 
-    // Subscribe to Logs
     const unsubscribeLogs = subscribeToLogs(
       (fetchedLogs) => {
         setLogs(fetchedLogs);
@@ -65,9 +60,8 @@ const App: React.FC = () => {
       unsubscribeUsers();
       unsubscribeLogs();
     };
-  }, [currentUser?.id]); // Re-run if current user ID changes (though logic inside handles it)
+  }, [currentUser?.id]);
 
-  // Global Confirmation Handler
   const requestConfirm = (message: string, onConfirm: () => void) => {
     setConfirmModal({ isOpen: true, message, onConfirm });
   };
@@ -99,17 +93,16 @@ const App: React.FC = () => {
     setCurrentUser(user);
     setLoginTimestamp(Date.now());
     setIsAuthenticated(true);
-    setActiveTab(Tab.TRACKER); // Always start at tracker
+    setActiveTab(Tab.TRACKER); 
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     setIsAuthenticated(false);
     setLoginTimestamp(undefined);
-    setIsSidebarOpen(true); // Reset sidebar for next login
+    setIsSidebarOpen(true); 
   };
 
-  // --- DATABASE PERMISSION ERROR SCREEN ---
   if (dbError === 'permission-denied') {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
@@ -121,7 +114,6 @@ const App: React.FC = () => {
             <h1 className="text-3xl font-bold text-slate-800">Database Access Denied</h1>
             <p className="text-slate-500 mt-2 text-lg">The application cannot read or write data to Google Firestore.</p>
           </div>
-          
           <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 space-y-4">
             <h3 className="font-bold text-slate-700 flex items-center gap-2">
               <Database className="w-5 h-5 text-blue-600" />
@@ -143,7 +135,6 @@ service cloud.firestore {
 }`}</pre>
             </div>
           </div>
-
           <button 
             onClick={() => window.location.reload()}
             className="w-full mt-8 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-blue-200"
@@ -157,7 +148,6 @@ service cloud.firestore {
 
   if (!isLoaded) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400 font-medium">Connecting to Cloud Database...</div>;
 
-  // --- SHOW LOGIN SCREEN IF NOT AUTHENTICATED ---
   if (!isAuthenticated) {
     return (
       <LoginView 
@@ -167,11 +157,9 @@ service cloud.firestore {
     );
   }
 
-  // --- AUTHENTICATED APP LAYOUT ---
   return (
     <div className="min-h-screen bg-slate-100 font-sans flex overflow-hidden">
       
-      {/* Confirmation Modal */}
       {confirmModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 transform transition-all scale-100 border border-slate-200">
@@ -200,7 +188,6 @@ service cloud.firestore {
         </div>
       )}
 
-      {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
         <div 
           className="fixed inset-0 bg-black/50 z-40 md:hidden backdrop-blur-sm transition-opacity"
@@ -208,12 +195,10 @@ service cloud.firestore {
         />
       )}
 
-      {/* Sidebar Navigation */}
       <aside 
         className={`fixed inset-y-0 left-0 z-50 w-72 bg-slate-900 text-slate-300 transform transition-transform duration-300 ease-in-out shadow-2xl flex flex-col
           ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
       >
-        {/* Sidebar Header */}
         <div className="p-6 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="bg-blue-600 p-2 rounded-lg">
@@ -229,7 +214,6 @@ service cloud.firestore {
           </button>
         </div>
 
-        {/* Current User Display */}
         <div className="p-4 border-b border-slate-800 bg-slate-800/50">
            <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shadow-sm ${currentUser?.role === 'ADMIN' ? 'bg-purple-600 text-white' : 'bg-blue-600 text-white'}`}>
@@ -247,7 +231,6 @@ service cloud.firestore {
            </div>
         </div>
 
-        {/* Nav Links */}
         <nav className="flex-1 p-4 space-y-2">
           <button
             onClick={() => handleNavClick(Tab.TRACKER)}
@@ -259,7 +242,6 @@ service cloud.firestore {
             <span className="font-medium">Tracker</span>
           </button>
 
-          {/* ADMIN ONLY LINKS */}
           {currentUser?.role === 'ADMIN' && (
             <>
               <button
@@ -283,13 +265,23 @@ service cloud.firestore {
               </button>
 
               <button
-                onClick={() => handleNavClick(Tab.SHIPMENT)}
+                onClick={() => handleNavClick(Tab.ORDERS)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
-                  activeTab === Tab.SHIPMENT ? 'bg-blue-600 text-white shadow-lg translate-x-1' : 'hover:bg-slate-800 hover:translate-x-1'
+                  activeTab === Tab.ORDERS ? 'bg-blue-600 text-white shadow-lg translate-x-1' : 'hover:bg-slate-800 hover:translate-x-1'
+                }`}
+              >
+                <ShoppingBag className="w-5 h-5" />
+                <span className="font-medium">Orders</span>
+              </button>
+
+              <button
+                onClick={() => handleNavClick(Tab.TRACKING)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
+                  activeTab === Tab.TRACKING ? 'bg-blue-600 text-white shadow-lg translate-x-1' : 'hover:bg-slate-800 hover:translate-x-1'
                 }`}
               >
                 <Truck className="w-5 h-5" />
-                <span className="font-medium">Shipment Tracking</span>
+                <span className="font-medium">Tracking</span>
               </button>
 
               <button
@@ -305,7 +297,6 @@ service cloud.firestore {
           )}
         </nav>
 
-        {/* Footer */}
         <div className="p-6 border-t border-slate-800">
            {currentUser?.role === 'ADMIN' && (
              <button 
@@ -326,7 +317,6 @@ service cloud.firestore {
         </div>
       </aside>
 
-      {/* Main Content Area */}
       <main 
         className={`flex-1 min-h-screen transition-all duration-300 flex flex-col
           ${isSidebarOpen ? 'md:ml-72' : 'md:ml-0'}`}
@@ -344,11 +334,11 @@ service cloud.firestore {
               {activeTab === Tab.TRACKER && "Daily Tracker"}
               {activeTab === Tab.ANALYTICS && "Performance Analytics"}
               {activeTab === Tab.HISTORY && "Detailed History"}
-              {activeTab === Tab.SHIPMENT && "Shipment Tracking"}
+              {activeTab === Tab.ORDERS && "ShipStation Orders"}
+              {activeTab === Tab.TRACKING && "Package Tracking"}
               {activeTab === Tab.CONFIGURATION && "Configuration"}
             </h2>
             
-            {/* Quick Logout for Header */}
             <button 
               onClick={handleLogout}
               className="text-slate-500 hover:text-red-600 hover:bg-red-50 p-2 rounded-full transition-colors"
@@ -380,8 +370,11 @@ service cloud.firestore {
               requestConfirm={requestConfirm} 
             />
           )}
-          {activeTab === Tab.SHIPMENT && currentUser?.role === 'ADMIN' && (
-             <ShipmentTrackingView logs={logs} />
+          {activeTab === Tab.ORDERS && currentUser?.role === 'ADMIN' && (
+             <OrderDetailsView />
+          )}
+          {activeTab === Tab.TRACKING && currentUser?.role === 'ADMIN' && (
+             <PackageTrackingView />
           )}
           {activeTab === Tab.CONFIGURATION && currentUser?.role === 'ADMIN' && (
             <ConfigurationView 
@@ -393,7 +386,6 @@ service cloud.firestore {
             />
           )}
           
-          {/* Fallback if user tries to access admin tabs */}
           {(activeTab !== Tab.TRACKER && currentUser?.role !== 'ADMIN') && (
             <div className="flex flex-col items-center justify-center h-full text-slate-400">
               <Shield className="w-16 h-16 mb-4 opacity-20" />

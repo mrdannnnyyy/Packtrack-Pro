@@ -28,6 +28,31 @@ export interface PackageLog {
   shipmentDetails?: ShipmentDetails;
 }
 
+export interface EnrichedOrder {
+  orderId: number | null;
+  orderNumber: string;
+  customerName: string;
+  customerEmail?: string;
+  items?: string;
+  shipDate?: string;
+  trackingNumber: string;
+  carrierCode?: string;
+  status: string;
+  location: string;
+  expectedDelivery: string;
+  lastUpdated: number;
+  delivered: boolean;
+  trackingUrl: string;
+  logDate?: string | null;
+}
+
+export interface PaginatedResponse {
+  data: EnrichedOrder[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
 export interface DaySummary {
   dateStr: string;
   totalPackages: number;
@@ -39,6 +64,7 @@ export enum Tab {
   TRACKER = 'TRACKER',
   HISTORY = 'HISTORY',
   ANALYTICS = 'ANALYTICS',
-  SHIPMENT = 'SHIPMENT',
+  ORDERS = 'ORDERS',
+  TRACKING = 'TRACKING',
   CONFIGURATION = 'CONFIGURATION'
 }
