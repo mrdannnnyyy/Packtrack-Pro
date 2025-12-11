@@ -1,10 +1,9 @@
-
 import React, { useState, useMemo } from 'react';
 import { PackageLog, User } from '../types';
 import { formatDate, calculateShiftStats, formatDuration } from '../utils';
 import { StatCard } from './StatCard';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
-import { TrendingUp, Package, Clock, Calendar, Users, Award, CalendarDays, Filter } from 'lucide-react';
+import { TrendingUp, Package, Clock, Calendar, Users, Award, CalendarDays } from 'lucide-react';
 
 interface AnalyticsViewProps {
   logs: PackageLog[];
@@ -33,7 +32,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
     }
     // 'ALL' remains 0
 
-    return logs.filter(log => {
+    return (logs || []).filter(log => {
       // 1. Check User
       const matchesUser = selectedUserId === 'ALL' || log.userId === selectedUserId;
       // 2. Check Date Range
@@ -189,7 +188,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
                </div>
                <span className="text-xs font-semibold bg-slate-100 px-2 py-1 rounded text-slate-500 uppercase">{timeRange}</span>
              </div>
-             <div className="h-64 w-full">
+             <div style={{ width: '100%', height: 300 }}>
                <ResponsiveContainer width="100%" height="100%">
                  <BarChart data={userStats} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
                    <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
@@ -210,18 +209,19 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
                </div>
                <span className="text-xs font-semibold bg-slate-100 px-2 py-1 rounded text-slate-500 uppercase">{timeRange}</span>
              </div>
-             <div className="h-64 w-full">
+             <div style={{ width: '100%', height: 300 }}>
                <ResponsiveContainer width="100%" height="100%">
                  <BarChart 
-                    data={[...userStats].sort((a,b) => (a.rawAvgDuration || 99999999) - (b.rawAvgDuration || 99999999)).filter(u => u.totalPackages > 0)} 
-                    layout="vertical" 
-                    margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                   data={[...userStats].sort((a,b) => (a.rawAvgDuration || 99999999) - (b.rawAvgDuration || 99999999)).filter(u => u.totalPackages > 0)} 
+                   layout="vertical" 
+                   margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
                  >
                    <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
                    <XAxis type="number" hide />
                    <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}} tickLine={false} axisLine={false} />
                    <Tooltip cursor={{fill: '#f1f5f9'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
-                   <Bar dataKey="avgDurationMinutes" fill="#10b981" radius={[0, 4, 4, 0]} barSize={20} name="Avg Mins" />
+                   {/* FIXED TYPO HERE: avgDurationMinutes -> avgDurationMins */}
+                   <Bar dataKey="avgDurationMins" fill="#10b981" radius={[0, 4, 4, 0]} barSize={20} name="Avg Mins" />
                  </BarChart>
                </ResponsiveContainer>
              </div>
@@ -236,7 +236,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
              <CalendarDays className="w-5 h-5 text-indigo-500" />
              <h3 className="text-lg font-bold text-slate-800">Volume Trend</h3>
           </div>
-          <div className="h-72 w-full">
+          <div style={{ width: '100%', height: 300 }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={timeSeriesData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
@@ -257,7 +257,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
              <Clock className="w-5 h-5 text-rose-500" />
              <h3 className="text-lg font-bold text-slate-800">Speed Trend (Mins)</h3>
           </div>
-          <div className="h-72 w-full">
+          <div style={{ width: '100%', height: 300 }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={timeSeriesData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />

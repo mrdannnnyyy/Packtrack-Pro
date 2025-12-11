@@ -348,7 +348,8 @@ service cloud.firestore {
           </div>
         </header>
 
-        <div className="p-4 md:p-8 max-w-7xl mx-auto w-full flex-1 overflow-y-auto">
+        {/* REMOVED max-w-7xl mx-auto to enable FULL SCREEN width */}
+        <div className="p-4 md:p-8 w-full flex-1 overflow-y-auto">
           {activeTab === Tab.TRACKER && (
             <TrackerView 
               logs={logs} 

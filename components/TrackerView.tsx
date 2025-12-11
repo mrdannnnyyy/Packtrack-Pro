@@ -28,7 +28,7 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Auto-clock out limit: 30 Minutes in milliseconds
-  const AUTO_TIMEOUT_MS = 60 * 60 * 1000;
+  const AUTO_TIMEOUT_MS = 60 * 60 * 3600;
 
   // Update timer every second for UI and check for timeouts
   useEffect(() => {
