@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { PackageLog, Tab, User } from './types';
 import { TrackerView } from './components/TrackerView';

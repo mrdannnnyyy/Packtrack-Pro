@@ -1,12 +1,10 @@
-
 import React, { useState, useEffect } from 'react';
 import { TrackingRow, fetchTrackingList, refreshSingleTracking } from '../upsApi';
-import { Truck, RefreshCw, ExternalLink, ChevronLeft, ChevronRight, Search, PackageCheck, AlertCircle, PackageOpen, Calendar, CloudOff } from 'lucide-react';
+import { Truck, RefreshCw, ExternalLink, ChevronLeft, ChevronRight, Search, PackageCheck, AlertCircle, PackageOpen, Calendar } from 'lucide-react';
 
 export const PackageTrackingView: React.FC = () => {
   const [rows, setRows] = useState<TrackingRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   
   // Pagination
   const [page, setPage] = useState(1);
@@ -21,15 +19,13 @@ export const PackageTrackingView: React.FC = () => {
 
   const load = async () => {
     setLoading(true);
-    setError(null);
     try {
       const res = await fetchTrackingList(page, pageSize);
       setRows(res.data);
       setTotalPages(res.totalPages);
       setTotalItems(res.total);
-    } catch (e: any) {
+    } catch (e) {
       console.error(e);
-      setError("Failed to connect to Google Cloud backend. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -94,16 +90,6 @@ export const PackageTrackingView: React.FC = () => {
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Update Statuses
           </button>
         </div>
-
-        {error && (
-             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-                <CloudOff className="w-6 h-6 text-red-600 mt-1" />
-                <div>
-                    <h3 className="text-red-800 font-bold">Connection Error</h3>
-                    <p className="text-red-600 text-sm mt-1">{error}</p>
-                </div>
-             </div>
-        )}
 
         {/* FILTERS TOOLBAR */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">

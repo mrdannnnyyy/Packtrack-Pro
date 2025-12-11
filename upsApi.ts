@@ -1,6 +1,6 @@
 import { EnrichedOrder, PaginatedResponse } from './types';
 
-// YOUR GOOGLE CLOUD RUN URL
+// REPLACE THIS WITH YOUR CLOUD RUN URL AFTER DEPLOYMENT
 const BACKEND_URL = "https://packtrack-ups-backend-214733779716.us-west1.run.app";
 
 export interface TrackingRow {
@@ -25,59 +25,45 @@ export interface TrackingResponse {
 }
 
 export async function fetchTrackingList(page: number = 1, limit: number = 25): Promise<TrackingResponse> {
-  try {
-    const response = await fetch(`${BACKEND_URL}/tracking/list?page=${page}&limit=${limit}`);
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Tracking API Error: ${response.status} - ${text}`);
-    }
-    return response.json();
-  } catch (error) {
-      console.error("Fetch Tracking List Error:", error);
-      throw error;
-  }
+  const response = await fetch(`${BACKEND_URL}/tracking/list?page=${page}&limit=${limit}`);
+  if (!response.ok) throw new Error("Failed to fetch tracking");
+  return response.json();
 }
 
 export async function refreshSingleTracking(trackingNumber: string): Promise<Partial<TrackingRow>> {
-  try {
-    const response = await fetch(`${BACKEND_URL}/tracking/single`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trackingNumber })
-    });
-    if (!response.ok) return { upsStatus: 'Error' };
-    return response.json();
-  } catch (error) {
-      console.error("Refresh Single Error:", error);
-      return { upsStatus: 'Connection Fail' };
-  }
+  const response = await fetch(`${BACKEND_URL}/tracking/single`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ trackingNumber })
+  });
+  if (!response.ok) return { upsStatus: 'Error' };
+  return response.json();
 }
 
 export async function fetchEnrichedOrders(page: number = 1, limit: number = 25): Promise<PaginatedResponse> {
-  try {
-    const response = await fetch(`${BACKEND_URL}/orders/enriched?page=${page}&limit=${limit}`);
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Enriched Orders API Error: ${response.status} - ${text}`);
-    }
-    return response.json();
-  } catch (error) {
-      console.error("Fetch Enriched Orders Error:", error);
-      throw error;
-  }
+  const response = await fetch(`${BACKEND_URL}/orders/enriched?page=${page}&limit=${limit}`);
+  if (!response.ok) throw new Error("Failed to fetch enriched orders");
+  return response.json();
 }
 
 export async function trackSingleOrder(trackingNumber: string): Promise<Partial<EnrichedOrder>> {
-  // Use existing logic for refreshing tracking, but map to EnrichedOrder format
-  const trackingData = await refreshSingleTracking(trackingNumber);
+  const response = await fetch(`${BACKEND_URL}/tracking/single`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ trackingNumber })
+  });
+
+  if (!response.ok) return { status: 'Error' };
+
+  const data = await response.json();
   
-  // Map TrackingRow partial to EnrichedOrder partial
+  // Map backend response (upsStatus) to EnrichedOrder format (status)
   return {
-    status: trackingData.upsStatus,
-    location: trackingData.location,
-    delivered: trackingData.delivered,
-    expectedDelivery: trackingData.expectedDelivery,
-    lastUpdated: trackingData.lastUpdated,
-    trackingUrl: trackingData.trackingUrl
+    status: data.upsStatus || data.status,
+    location: data.location,
+    delivered: data.delivered,
+    expectedDelivery: data.expectedDelivery,
+    lastUpdated: data.lastUpdated,
+    trackingUrl: data.trackingUrl
   };
 }

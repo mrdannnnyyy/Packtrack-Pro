@@ -1,13 +1,10 @@
-
 import React, { useState, useEffect } from 'react';
 import { BasicOrder, fetchBasicOrders } from '../shipstationApi';
-import { ShoppingBag, RefreshCw, ChevronLeft, ChevronRight, Mail, ExternalLink, CloudOff } from 'lucide-react';
+import { ShoppingBag, RefreshCw, ChevronLeft, ChevronRight, Mail, ExternalLink } from 'lucide-react';
 
 export const OrderDetailsView: React.FC = () => {
   const [orders, setOrders] = useState<BasicOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [totalPages, setTotalPages] = useState(1);
@@ -15,15 +12,13 @@ export const OrderDetailsView: React.FC = () => {
 
   const load = async () => {
     setLoading(true);
-    setError(null);
     try {
       const res = await fetchBasicOrders(page, pageSize);
       setOrders(res.data);
       setTotalPages(res.totalPages);
       setTotal(res.total);
-    } catch (e: any) {
+    } catch (e) {
       console.error(e);
-      setError("Failed to fetch orders from Google Cloud backend. Please check your connection.");
     } finally {
       setLoading(false);
     }
@@ -45,16 +40,6 @@ export const OrderDetailsView: React.FC = () => {
         </button>
       </div>
 
-      {error && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-          <CloudOff className="w-6 h-6 text-red-600 mt-1" />
-          <div>
-              <h3 className="text-red-800 font-bold">Connection Error</h3>
-              <p className="text-red-600 text-sm mt-1">{error}</p>
-          </div>
-        </div>
-      )}
-
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200">
@@ -71,8 +56,6 @@ export const OrderDetailsView: React.FC = () => {
             <tbody className="divide-y divide-slate-200">
               {loading ? (
                 <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-400">Loading Orders...</td></tr>
-              ) : orders.length === 0 ? (
-                <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-400">No orders found.</td></tr>
               ) : orders.map((o) => (
                 <tr key={o.orderId} className="hover:bg-slate-50 transition-colors">
                   <td className="px-6 py-4 text-sm font-bold text-slate-800">{o.orderNumber}</td>
