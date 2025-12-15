@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { PackageLog, User } from '../types';
 import { formatDate, calculateShiftStats, formatDuration } from '../utils';
@@ -21,7 +22,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     
-    // Calculate cutoff time based on range
     let cutoffTime = 0;
     if (timeRange === 'TODAY') {
       cutoffTime = startOfDay;
@@ -30,20 +30,15 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
     } else if (timeRange === 'MONTH') {
       cutoffTime = startOfDay - (30 * 24 * 60 * 60 * 1000);
     }
-    // 'ALL' remains 0
 
     return (logs || []).filter(log => {
-      // 1. Check User
       const matchesUser = selectedUserId === 'ALL' || log.userId === selectedUserId;
-      // 2. Check Date Range
       const matchesDate = log.startTime >= cutoffTime;
       return matchesUser && matchesDate;
     });
   }, [logs, selectedUserId, timeRange]);
 
   // --- AGGREGATION LOGIC ---
-
-  // 1. Time Series Data (Daily Breakdown)
   const logsByDate: { [key: string]: PackageLog[] } = {};
   filteredLogs.forEach(log => {
     if (!logsByDate[log.dateStr]) logsByDate[log.dateStr] = [];
@@ -62,10 +57,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
     };
   });
 
-  // 2. User Comparison Data
   const userStats = users.map(user => {
-    // Filter the ALREADY filtered logs to just this user
-    // This ensures the leaderboard respects the selected time range
     const userLogs = filteredLogs.filter(l => l.userId === user.id);
     const stats = calculateShiftStats(userLogs);
     return {
@@ -83,7 +75,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
     ? completedLogs.reduce((acc, l) => acc + ((l.endTime || 0) - l.startTime), 0) / completedLogs.length 
     : 0;
   
-  // Calculate active days within the selected range
   const distinctDays = Object.keys(logsByDate).length;
   const efficiencyRate = distinctDays > 0 ? (totalPackages / distinctDays).toFixed(0) : 0;
 
@@ -107,7 +98,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
-          {/* Time Range Selector */}
           <div className="flex bg-slate-100 p-1 rounded-lg">
             {(['TODAY', 'WEEK', 'MONTH', 'ALL'] as TimeRange[]).map((range) => (
               <button
@@ -126,7 +116,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
             ))}
           </div>
 
-          {/* User Filter */}
           <div className="relative">
              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Users className="w-4 h-4 text-slate-400" />
@@ -177,7 +166,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
         />
       </div>
 
-      {/* LEADERBOARDS (Only visible if 'All Users' is selected) */}
+      {/* LEADERBOARDS */}
       {selectedUserId === 'ALL' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
@@ -220,7 +209,6 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, users }) => 
                    <XAxis type="number" hide />
                    <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}} tickLine={false} axisLine={false} />
                    <Tooltip cursor={{fill: '#f1f5f9'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
-                   {/* FIXED TYPO HERE: avgDurationMinutes -> avgDurationMins */}
                    <Bar dataKey="avgDurationMins" fill="#10b981" radius={[0, 4, 4, 0]} barSize={20} name="Avg Mins" />
                  </BarChart>
                </ResponsiveContainer>

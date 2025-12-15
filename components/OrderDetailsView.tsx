@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BasicOrder, fetchOrders, syncOrders } from '../shipstationApi';
-import { ShoppingBag, RefreshCw, ChevronLeft, ChevronRight, Mail, ExternalLink, CloudDownload, AlertCircle } from 'lucide-react';
+import { ShoppingBag, RefreshCw, ChevronLeft, ChevronRight, Mail, ExternalLink, CloudDownload, AlertCircle, Search } from 'lucide-react';
 
 export const OrderDetailsView: React.FC = () => {
   const [orders, setOrders] = useState<BasicOrder[]>([]);
@@ -13,6 +13,41 @@ export const OrderDetailsView: React.FC = () => {
   const [total, setTotal] = useState(0);
   const [lastSync, setLastSync] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  
+  // Search State
+  const [filterText, setFilterText] = useState('');
+
+  // Column Resizing State
+  const [colWidths, setColWidths] = useState({
+    order: 150,
+    date: 120,
+    customer: 250,
+    items: 300,
+    tracking: 180
+  });
+
+  const resizeRef = useRef<{ col: keyof typeof colWidths, startX: number, startWidth: number } | null>(null);
+
+  const handleResizeStart = (e: React.MouseEvent, col: keyof typeof colWidths) => {
+    resizeRef.current = { col, startX: e.clientX, startWidth: colWidths[col] };
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!resizeRef.current) return;
+    const diff = e.clientX - resizeRef.current.startX;
+    setColWidths(prev => ({
+      ...prev,
+      [resizeRef.current!.col]: Math.max(80, resizeRef.current!.startWidth + diff)
+    }));
+  };
+
+  const handleMouseUp = () => {
+    resizeRef.current = null;
+    document.removeEventListener('mousemove', handleMouseMove);
+    document.removeEventListener('mouseup', handleMouseUp);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -46,6 +81,18 @@ export const OrderDetailsView: React.FC = () => {
 
   useEffect(() => { load(); }, [page, pageSize]);
 
+  // Client-Side Filter
+  const filteredOrders = orders.filter(o => {
+    const s = filterText.toLowerCase();
+    return (
+      (o.orderNumber || '').toLowerCase().includes(s) ||
+      (o.customerName || '').toLowerCase().includes(s) ||
+      (o.customerEmail || '').toLowerCase().includes(s) ||
+      (o.items || '').toLowerCase().includes(s) ||
+      (o.trackingNumber || '').toLowerCase().includes(s)
+    );
+  });
+
   return (
     <div className="space-y-6">
       {error && (
@@ -58,7 +105,7 @@ export const OrderDetailsView: React.FC = () => {
         </div>
       )}
 
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between md:items-center gap-4">
         <div>
            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
              <ShoppingBag className="w-8 h-8 text-blue-600" /> Order Database
@@ -81,43 +128,82 @@ export const OrderDetailsView: React.FC = () => {
           </button>
         </div>
       </div>
+      
+      {/* Search Bar */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <Search className="h-4 w-4 text-slate-400" />
+          </div>
+          <input 
+            type="text"
+            className="block w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            placeholder="Search Order #, Customer, Items or Tracking..."
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+          />
+        </div>
+      </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Order #</th>
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Date</th>
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Customer</th>
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Items</th>
-                <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Tracking</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200">
-              {loading && (orders || []).length === 0 ? (
-                <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400">Loading Database...</td></tr>
-              ) : (orders || []).map((o, i) => (
-                <tr key={`${o.orderId}-${i}`} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-6 py-4 text-sm font-bold text-slate-800">{o.orderNumber}</td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{o.shipDate}</td>
-                  <td className="px-6 py-4">
-                     <div className="text-sm font-medium text-slate-800">{o.customerName}</div>
-                     <div className="text-xs text-slate-400 flex items-center gap-1"><Mail className="w-3 h-3"/> {o.customerEmail}</div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-slate-600 max-w-xs truncate" title={o.items}>{o.items}</td>
-                  <td className="px-6 py-4 text-sm font-mono text-slate-600">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden overflow-x-auto">
+        <div className="min-w-full inline-block align-middle">
+          {/* Custom Resizable Header */}
+          <div className="flex border-b border-slate-200 bg-slate-50">
+             {[
+               { key: 'order', label: 'Order #' },
+               { key: 'date', label: 'Date' },
+               { key: 'customer', label: 'Customer' },
+               { key: 'items', label: 'Items' },
+               { key: 'tracking', label: 'Tracking' }
+             ].map(col => (
+               <div
+                 key={col.key}
+                 className="relative px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase flex-shrink-0 select-none hover:bg-slate-100"
+                 style={{ width: colWidths[col.key as keyof typeof colWidths] }}
+               >
+                 {col.label}
+                 <div 
+                   className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 transition-colors z-10"
+                   onMouseDown={(e) => handleResizeStart(e, col.key as keyof typeof colWidths)}
+                 />
+               </div>
+             ))}
+          </div>
+
+          <div className="divide-y divide-slate-200">
+            {loading && orders.length === 0 ? (
+               <div className="p-12 text-center text-slate-400">Loading Database...</div>
+            ) : filteredOrders.length === 0 ? (
+               <div className="p-12 text-center text-slate-400">No matching orders found.</div>
+            ) : (
+              filteredOrders.map((o, i) => (
+                <div key={`${o.orderId}-${i}`} className="flex hover:bg-slate-50 transition-colors items-center">
+                  <div className="px-6 py-4 text-sm font-bold text-slate-800 flex-shrink-0 truncate" style={{ width: colWidths.order }}>
+                    {o.orderNumber}
+                  </div>
+                  <div className="px-6 py-4 text-sm text-slate-600 flex-shrink-0 truncate" style={{ width: colWidths.date }}>
+                    {o.shipDate}
+                  </div>
+                  <div className="px-6 py-4 flex-shrink-0 truncate" style={{ width: colWidths.customer }}>
+                     <div className="text-sm font-medium text-slate-800 truncate" title={o.customerName}>{o.customerName}</div>
+                     <div className="text-xs text-slate-400 flex items-center gap-1 truncate" title={o.customerEmail}><Mail className="w-3 h-3"/> {o.customerEmail}</div>
+                  </div>
+                  <div className="px-6 py-4 text-sm text-slate-600 flex-shrink-0 truncate" title={o.items} style={{ width: colWidths.items }}>
+                    {o.items}
+                  </div>
+                  <div className="px-6 py-4 text-sm font-mono text-slate-600 flex-shrink-0 truncate" style={{ width: colWidths.tracking }}>
                     {o.trackingNumber !== 'No Tracking' ? (
                        <a href={`https://www.google.com/search?q=${o.trackingNumber}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-blue-600 hover:underline">
                          {o.trackingNumber} <ExternalLink className="w-3 h-3" />
                        </a>
                     ) : <span className="text-slate-400">No Tracking</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
+        
         <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center">
             <span className="text-sm text-slate-500">Page {page} of {totalPages} ({total} orders)</span>
             <div className="flex gap-2">

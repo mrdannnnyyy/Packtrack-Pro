@@ -1,7 +1,7 @@
 
 import { EnrichedOrder, PaginatedResponse } from './types';
 
-// REPLACE THIS WITH YOUR CLOUD RUN URL
+// Reverting to the live Cloud Run backend for Tracking Data
 const BACKEND_URL = "https://packtrack-ups-backend-214733779716.us-west1.run.app";
 
 export interface TrackingRow {
@@ -14,6 +14,9 @@ export interface TrackingRow {
   lastUpdated: number;
   trackingUrl: string;
   isError: boolean;
+  // Fields merged from Firebase
+  flagged?: boolean;
+  notes?: string;
 }
 
 export interface TrackingResponse {
@@ -35,13 +38,18 @@ export async function fetchTrackingList(page: number = 1, limit: number = 25): P
 }
 
 export async function refreshSingleTracking(trackingNumber: string): Promise<Partial<TrackingRow>> {
-  const response = await fetch(`${BACKEND_URL}/tracking/single`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ trackingNumber })
-  });
-  if (!response.ok) return { upsStatus: 'Error', isError: true };
-  return response.json();
+  try {
+    const response = await fetch(`${BACKEND_URL}/tracking/single`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trackingNumber })
+    });
+    if (!response.ok) return { upsStatus: 'Error', isError: true };
+    return response.json();
+  } catch (e) {
+    console.error("API Error:", e);
+    return { upsStatus: 'Error', isError: true };
+  }
 }
 
 export async function fetchEnrichedOrders(page: number = 1, limit: number = 25): Promise<PaginatedResponse> {
@@ -56,11 +64,15 @@ export async function fetchEnrichedOrders(page: number = 1, limit: number = 25):
 }
 
 export async function trackSingleOrder(trackingNumber: string): Promise<Partial<EnrichedOrder>> {
-  const response = await fetch(`${BACKEND_URL}/tracking/single`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ trackingNumber })
-  });
-  if (!response.ok) return { status: 'Error' };
-  return response.json();
+  try {
+    const response = await fetch(`${BACKEND_URL}/tracking/single`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trackingNumber })
+    });
+    if (!response.ok) return { status: 'Error' };
+    return response.json();
+  } catch (e) {
+    return { status: 'Error' };
+  }
 }

@@ -1,3 +1,4 @@
+
 /**
  * PackTrack Pro Server
  * 
@@ -124,7 +125,9 @@ app.post('/sync/orders', async (req, res) => {
       lastUpdated: Date.now(),
       // Fields for UPS enrichment
       upsStatus: 'Pending',
-      delivered: false
+      delivered: false,
+      flagged: false,
+      notes: ''
     }));
 
     const batch = db.batch();
@@ -177,6 +180,26 @@ app.post('/tracking/single', async (req, res) => {
   }
 
   try {
+    // 1. CHECK EXISTING STATUS
+    // If the package is already delivered, we DO NOT want to randomize it back to "In Transit"
+    const existingSnap = await db.collection(COLLECTION_NAME).where('trackingNumber', '==', trackingNumber).get();
+    let isAlreadyDelivered = false;
+    let existingDoc = null;
+
+    if (!existingSnap.empty) {
+      existingDoc = existingSnap.docs[0];
+      const data = existingDoc.data();
+      if (data.delivered === true || (data.upsStatus && data.upsStatus.toLowerCase().includes('delivered'))) {
+        isAlreadyDelivered = true;
+      }
+    }
+
+    // 2. LOCK ON DELIVERY
+    if (isAlreadyDelivered && existingDoc) {
+      console.log(`Tracking ${trackingNumber} is already DELIVERED. Skipping refresh to preserve state.`);
+      return res.json(existingDoc.data());
+    }
+
     // --- REAL IMPLEMENTATION EXAMPLE ---
     /*
     const upsLicense = process.env.UPS_LICENSE_KEY;
@@ -217,6 +240,33 @@ app.post('/tracking/single', async (req, res) => {
   } catch (error) {
     console.error('Error updating tracking:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /tracking/annotate
+ * Saves notes and flags for an order.
+ */
+app.post('/tracking/annotate', async (req, res) => {
+  const { trackingNumber, flagged, notes } = req.body;
+  if (!trackingNumber) return res.status(400).send("Missing tracking number");
+
+  try {
+    const snapshot = await db.collection(COLLECTION_NAME).where('trackingNumber', '==', trackingNumber).get();
+    
+    if (!snapshot.empty) {
+      const batch = db.batch();
+      snapshot.forEach(doc => {
+        batch.update(doc.ref, { flagged, notes });
+      });
+      await batch.commit();
+      res.json({ success: true });
+    } else {
+      res.status(404).send("Order not found");
+    }
+  } catch (e) {
+    console.error("Error annotating:", e);
+    res.status(500).send(e.message);
   }
 });
 

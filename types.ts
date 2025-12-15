@@ -26,6 +26,12 @@ export interface PackageLog {
   endTime: number | null; 
   dateStr: string; 
   shipmentDetails?: ShipmentDetails;
+  // New field for auto-populated data
+  matchedOrder?: {
+    orderNumber: string;
+    customerName: string;
+    items: string;
+  };
 }
 
 export interface EnrichedOrder {

@@ -1,3 +1,4 @@
+
 import { initializeApp } from "firebase/app";
 import { 
   getFirestore, 
@@ -10,7 +11,8 @@ import {
   query, 
   where, 
   getDocs, 
-  writeBatch
+  writeBatch,
+  setDoc
 } from "firebase/firestore";
 import { PackageLog, User, ShipmentDetails } from './types';
 
@@ -35,6 +37,7 @@ const db = getFirestore(app);
 // Collection References
 const LOGS_COL = 'packtrack_logs';
 const USERS_COL = 'packtrack_users';
+const ANNOTATIONS_COL = 'packtrack_annotations'; // New collection for flags/notes
 
 // --- LISTENERS (REAL-TIME SYNC) ---
 
@@ -80,25 +83,69 @@ export const subscribeToUsers = (
   );
 };
 
+// --- ANNOTATIONS (FLAGS & NOTES) ---
+
+export interface Annotation {
+  trackingNumber: string;
+  flagged: boolean;
+  notes: string;
+  updatedAt: number;
+}
+
+export const subscribeToAnnotations = (
+  onData: (annotations: Record<string, Annotation>) => void
+) => {
+  const q = collection(db, ANNOTATIONS_COL);
+  return onSnapshot(q, (snapshot) => {
+    const lookup: Record<string, Annotation> = {};
+    snapshot.docs.forEach(doc => {
+      lookup[doc.id] = doc.data() as Annotation;
+    });
+    onData(lookup);
+  });
+};
+
+export const saveAnnotation = async (trackingNumber: string, flagged: boolean, notes: string) => {
+  if (!trackingNumber) return;
+  // Use trackingNumber as the document ID for easy lookup
+  const docRef = doc(db, ANNOTATIONS_COL, trackingNumber);
+  await setDoc(docRef, {
+    trackingNumber,
+    flagged,
+    notes,
+    updatedAt: Date.now()
+  }, { merge: true });
+};
+
+
 // --- LOG OPERATIONS ---
 
 export const addLogEntry = async (log: Omit<PackageLog, 'id'>) => {
   const logsRef = collection(db, LOGS_COL);
-  const q = query(logsRef, where("endTime", "==", null));
-  const snapshot = await getDocs(q);
   
-  const batch = writeBatch(db);
-  let hasUpdates = false;
-
-  snapshot.docs.forEach((docSnap) => {
-    batch.update(docSnap.ref, { endTime: Date.now() });
-    hasUpdates = true;
-  });
-
-  if (hasUpdates) {
-    await batch.commit();
+  // Attempt to clock out previous active logs for THIS USER
+  // We wrap this in a try/catch because querying by [userId, endTime] requires a composite index.
+  // If the index is missing, we log a warning but PROCEED to add the new log so the user isn't blocked.
+  try {
+    const q = query(
+      logsRef, 
+      where("userId", "==", log.userId),
+      where("endTime", "==", null)
+    );
+    const snapshot = await getDocs(q);
+    
+    if (!snapshot.empty) {
+      const batch = writeBatch(db);
+      snapshot.docs.forEach((docSnap) => {
+        batch.update(docSnap.ref, { endTime: Date.now() });
+      });
+      await batch.commit();
+    }
+  } catch (err) {
+    console.warn("Auto-clock-out skipped (likely missing index or permission). Proceeding to add new log.", err);
   }
 
+  // Always add the new log
   await addDoc(logsRef, log);
 };
 
@@ -136,6 +183,9 @@ export const clearAllSystemData = async () => {
   
   const usersSnap = await getDocs(collection(db, USERS_COL));
   usersSnap.forEach(d => batch.delete(d.ref));
+  
+  const annSnap = await getDocs(collection(db, ANNOTATIONS_COL));
+  annSnap.forEach(d => batch.delete(d.ref));
   
   await batch.commit();
 };

@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { PackageLog, User, Tab } from '../types';
-import { formatDuration, formatDurationHours, formatTime, getDurationColor, calculateShiftStats, formatDate, getLocalDateStr } from '../utils';
+import { formatDuration, formatDurationHours, formatTime, getDurationColor, calculateShiftStats, getLocalDateStr } from '../utils';
 import { addLogEntry, clockOutActiveLog, autoTimeoutLog, deleteLogEntry } from '../firebase';
-import { Play, Square, Clock, Package, User as UserIcon, Lock, ArrowRight, Trash2, Loader2 } from 'lucide-react';
+import { fetchOrders } from '../shipstationApi'; 
+import { Play, Square, Clock, Package, User as UserIcon, Lock, ArrowRight, Trash2, Loader2, CheckCircle2, ShoppingBag, UserCircle } from 'lucide-react';
 
 interface TrackerViewProps {
   logs: PackageLog[];
@@ -27,83 +28,87 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-clock out limit: 30 Minutes in milliseconds
   const AUTO_TIMEOUT_MS = 60 * 60 * 3600;
 
-  // Update timer every second for UI and check for timeouts
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
       setCurrentTime(now);
-
-      // Check for any active logs that have exceeded the 30-minute limit
       logs.forEach(l => {
         if (l.endTime === null && (now - l.startTime > AUTO_TIMEOUT_MS)) {
-           // Call database to update this specific log
            autoTimeoutLog(l.id, l.startTime, AUTO_TIMEOUT_MS);
         }
       });
-
     }, 1000);
     return () => clearInterval(timer);
   }, [logs, AUTO_TIMEOUT_MS]);
 
-  // Use getLocalDateStr helper to ensure we use local machine time, not UTC
   const todayStr = getLocalDateStr();
-  
-  // 1. Filter logs to show only those with today's date string
-  // 2. AND check if the startTime is actually > midnight today local time to catch edge cases
   const startOfToday = new Date();
   startOfToday.setHours(0,0,0,0);
   
-  const todaysLogs = logs
-    .filter(l => l.startTime >= startOfToday.getTime())
+  const userLogs = logs
+    .filter(l => 
+      l.startTime >= startOfToday.getTime() && 
+      currentUser && 
+      l.userId === currentUser.id
+    )
     .sort((a, b) => b.startTime - a.startTime);
   
-  // Calculate stats ONLY for the current user to show their personal daily progress
-  const currentUserTodaysLogs = currentUser 
-    ? todaysLogs.filter(l => l.userId === currentUser.id)
-    : [];
-    
-  const userStats = calculateShiftStats(currentUserTodaysLogs);
+  const userStats = calculateShiftStats(userLogs);
   
-  // Custom Shift Start Logic:
-  // If no logs, shift hasn't started.
-  // If logs exist, shift start is the EARLIER of (Login Time) or (First Scan Time)
   let adjustedShiftDuration = 0;
-  if (currentUserTodaysLogs.length > 0) {
-      const firstScanTime = Math.min(...currentUserTodaysLogs.map(l => l.startTime));
+  if (userLogs.length > 0) {
+      const firstScanTime = Math.min(...userLogs.map(l => l.startTime));
       const effectiveStartTime = loginTimestamp ? Math.min(loginTimestamp, firstScanTime) : firstScanTime;
-      const lastActivityTime = Math.max(...currentUserTodaysLogs.map(l => l.endTime || currentTime));
+      const lastActivityTime = Math.max(...userLogs.map(l => l.endTime || currentTime));
       adjustedShiftDuration = lastActivityTime - effectiveStartTime;
   }
 
-  // Find ANY active log (could be another user if they forgot to clock out)
-  const activeLog = todaysLogs.find(l => l.endTime === null);
+  const activeLog = userLogs.find(l => l.endTime === null);
 
   const handleScan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim() || !currentUser) return;
+    const trackingId = inputValue.trim();
 
     setIsSaving(true);
     
     try {
+      let matchedOrderData = undefined;
+      try {
+        const recentOrders = await fetchOrders(1, 100);
+        const match = recentOrders.data.find(o => 
+          o.trackingNumber.toLowerCase() === trackingId.toLowerCase()
+        );
+
+        if (match) {
+          matchedOrderData = {
+            orderNumber: match.orderNumber,
+            customerName: match.customerName,
+            items: match.items
+          };
+        }
+      } catch (err) {
+        console.warn("Auto-population failed, proceeding with basic log", err);
+      }
+
       const now = Date.now();
       await addLogEntry({
-        trackingId: inputValue.trim(),
+        trackingId: trackingId,
         userId: currentUser.id,
         startTime: now,
         endTime: null,
-        dateStr: todayStr
+        dateStr: todayStr,
+        matchedOrder: matchedOrderData || null 
       });
 
       setInputValue('');
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error creating log:", error);
-      alert("Failed to create log. Please try again.");
+      alert(`Failed to create log. Error: ${error.message || 'Unknown'}. Please check your database rules.`);
     } finally {
       setIsSaving(false);
-      // Use setTimeout to ensure the input is re-enabled in the DOM before focusing
       setTimeout(() => {
         if (inputRef.current) {
           inputRef.current.focus();
@@ -114,7 +119,6 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
 
   const handleClockOutAll = () => {
     if (!activeLog) return;
-    
     requestConfirm("Are you sure you want to clock out the active package?", () => {
       clockOutActiveLog(activeLog.id);
     });
@@ -127,8 +131,6 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
     });
   };
 
-  const getUserName = (id: string) => users.find(u => u.id === id)?.name || 'Unknown';
-
   if (!currentUser) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8 space-y-6">
@@ -138,7 +140,7 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
         <div className="max-w-md space-y-2">
           <h2 className="text-2xl font-bold text-slate-800">Tracker Locked</h2>
           <p className="text-slate-500">
-            A user must be selected before you can start tracking packages. Please go to Configuration to select or create a user.
+            A user must be selected before you can start tracking packages.
           </p>
         </div>
         <button 
@@ -154,9 +156,7 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Top Bar: Input and Stats */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Input Area */}
         <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <label className="block text-sm font-semibold text-slate-700 mb-2">
             Scan or Enter Tracking ID
@@ -214,7 +214,6 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
           </div>
         </div>
 
-        {/* Daily Stats Summary for CURRENT USER */}
         <div className="bg-slate-800 text-white p-6 rounded-xl shadow-md flex flex-col justify-between relative overflow-hidden">
           <div className="absolute top-0 right-0 p-3 opacity-10">
             <UserIcon className="w-24 h-24" />
@@ -222,119 +221,146 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
           <div>
             <h3 className="text-slate-300 text-sm font-medium uppercase tracking-wider mb-1 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-green-400"></span>
-              {currentUser.name}'s Shift
+              My Shift
             </h3>
             <p className="text-3xl font-bold font-mono">{formatDurationHours(adjustedShiftDuration)}</p>
           </div>
           <div className="mt-4 pt-4 border-t border-slate-600 grid grid-cols-2 gap-4 relative z-10">
             <div>
-              <p className="text-slate-400 text-xs">Packages</p>
+              <p className="text-slate-400 text-xs">My Packages</p>
               <p className="text-xl font-semibold">{userStats.count}</p>
             </div>
             <div>
-              <p className="text-slate-400 text-xs">Avg Time</p>
+              <p className="text-slate-400 text-xs">My Avg Time</p>
               <p className="text-xl font-semibold">{formatDuration(userStats.avgDuration)}</p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Active Package Banner */}
       {activeLog && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between animate-pulse">
-          <div className="flex items-center gap-4">
-            <div className="bg-blue-600 text-white p-3 rounded-full">
-              <Clock className="w-6 h-6 animate-spin-slow" />
-            </div>
-            <div>
-              <p className="text-sm text-blue-600 font-bold uppercase tracking-wide">
-                Currently Packing ({getUserName(activeLog.userId)})
-              </p>
-              <p className="text-xl font-bold text-slate-800 break-all">{activeLog.trackingId}</p>
-              <p className="text-sm text-slate-500">Started at {formatTime(activeLog.startTime)}</p>
-            </div>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex flex-col items-start justify-between animate-pulse">
+          <div className="w-full flex items-center justify-between mb-4">
+             <div className="flex items-center gap-4">
+                <div className="bg-blue-600 text-white p-3 rounded-full">
+                  <Clock className="w-6 h-6 animate-spin-slow" />
+                </div>
+                <div>
+                  <p className="text-sm text-blue-600 font-bold uppercase tracking-wide flex items-center gap-2">
+                    Currently Packing
+                    {activeLog.matchedOrder && (
+                      <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs flex items-center gap-1 border border-green-200">
+                        <CheckCircle2 className="w-3 h-3" /> Order Found
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xl font-bold text-slate-800 break-all">{activeLog.trackingId}</p>
+                </div>
+             </div>
+             <div className="text-right">
+                <p className="text-3xl font-mono font-bold text-blue-700">
+                   {formatDuration(currentTime - activeLog.startTime)}
+                </p>
+             </div>
           </div>
-          <div className="mt-4 sm:mt-0 text-center sm:text-right">
-             <p className="text-3xl font-mono font-bold text-blue-700">
-               {formatDuration(currentTime - activeLog.startTime)}
-             </p>
-          </div>
+              
+          {activeLog.matchedOrder ? (
+              <div className="w-full bg-white/60 p-4 rounded-lg border border-blue-100">
+                <div className="flex items-center justify-between text-sm text-slate-500 mb-1 border-b border-slate-200/50 pb-2">
+                    <span className="font-semibold text-slate-600">Order #{activeLog.matchedOrder.orderNumber}</span>
+                    <div className="flex items-center gap-2">
+                        <UserCircle className="w-5 h-5 text-blue-600"/> 
+                        <span className="text-2xl font-extrabold text-slate-900 tracking-tight">{activeLog.matchedOrder.customerName}</span>
+                    </div>
+                </div>
+                <div className="mt-2">
+                   <span className="text-slate-900 font-extrabold text-2xl italic leading-tight block whitespace-normal">
+                     {activeLog.matchedOrder.items}
+                   </span>
+                </div>
+              </div>
+          ) : (
+              <p className="text-sm text-slate-500 ml-16">Started at {formatTime(activeLog.startTime)}</p>
+          )}
         </div>
       )}
 
-      {/* Recent Log Table */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-          <h2 className="font-semibold text-slate-800">Station Log (Today)</h2>
-          <span className="text-xs font-medium text-slate-500 bg-slate-200 px-2 py-1 rounded-full">{todaysLogs.length} entries</span>
+          <h2 className="font-semibold text-slate-800">My Station Log (Today)</h2>
+          <span className="text-xs font-medium text-slate-500 bg-slate-200 px-2 py-1 rounded-full">{userLogs.length} entries</span>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50">
               <tr>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">User</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Date</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Tracking ID</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Start Time</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">End Time</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Time</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Tracking ID / Order Info</th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Duration</th>
-                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Status / Action</th>
+                <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-slate-200">
-              {todaysLogs.length === 0 ? (
+              {userLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={4} className="px-6 py-12 text-center text-slate-400">
                     <Package className="w-12 h-12 mx-auto mb-2 opacity-20" />
-                    No packages tracked today.
+                    No packages tracked by you today.
                   </td>
                 </tr>
               ) : (
-                todaysLogs.map((log) => {
+                userLogs.map((log) => {
                   const isComplete = log.endTime !== null;
                   const duration = isComplete ? (log.endTime! - log.startTime) : (currentTime - log.startTime);
-                  const isMyLog = log.userId === currentUser.id;
                   
                   return (
-                    <tr key={log.id} className={`hover:bg-slate-50 transition-colors ${isMyLog ? 'bg-blue-50/30' : ''}`}>
-                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 flex items-center gap-2">
-                         <div className={`w-2 h-2 rounded-full ${isMyLog ? 'bg-blue-500' : 'bg-slate-300'}`} />
-                         {getUserName(log.userId)}
-                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{formatDate(log.dateStr)}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
-                        {log.trackingId}
+                    <tr key={log.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-mono align-top">
+                         {formatTime(log.startTime)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-mono">{formatTime(log.startTime)}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-mono">
-                        {log.endTime ? formatTime(log.endTime) : '-'}
+                      <td className="px-6 py-4 text-sm text-slate-900 align-top">
+                        <div className="flex flex-col gap-1">
+                           <span className="font-bold font-mono">{log.trackingId}</span>
+                           {log.matchedOrder ? (
+                             <div className="mt-2 p-2 bg-slate-50 rounded-lg border border-slate-100">
+                                <div className="flex items-center gap-3 mb-2">
+                                    <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold border border-blue-200 flex items-center gap-1">
+                                      <ShoppingBag className="w-3 h-3" /> {log.matchedOrder.orderNumber}
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <UserCircle className="w-4 h-4 text-slate-400" /> 
+                                      <span className="text-lg font-bold text-slate-800">{log.matchedOrder.customerName}</span>
+                                    </span>
+                                </div>
+                                <span className="text-slate-800 font-bold italic block whitespace-normal text-base leading-snug">
+                                  {log.matchedOrder.items}
+                                </span>
+                             </div>
+                           ) : (
+                             <span className="text-xs text-slate-400 mt-1 block">Manual Entry / No Order Match</span>
+                           )}
+                        </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-mono">
-                        <span className={`px-3 py-1.5 rounded-md text-base font-bold border ${getDurationColor(duration)}`}>
-                          {formatDurationHours(duration) === '0m' ? formatDuration(duration) : formatDurationHours(duration)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm flex justify-end gap-2 items-center">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-mono align-top">
                          {isComplete ? (
-                           <span className="text-slate-500 text-xs font-medium bg-slate-100 px-2 py-1 rounded mr-2">
-                             Done
+                           <span className={`px-2.5 py-1 rounded-md text-sm font-bold border ${getDurationColor(duration)}`}>
+                             {formatDuration(duration)}
                            </span>
                          ) : (
-                           <span className="text-blue-600 text-xs font-medium animate-pulse mr-2 flex items-center gap-1">
-                             <Clock className="w-3 h-3" /> Tracking
+                           <span className="text-blue-600 text-sm font-bold animate-pulse flex items-center gap-1">
+                             <Clock className="w-3 h-3" /> Tracking...
                            </span>
                          )}
-                         
-                         {currentUser?.role === 'ADMIN' && (
-                           <button 
-                             type="button"
-                             onClick={(e) => handleDelete(e, log.id)}
-                             className="text-slate-300 hover:text-red-500 p-1.5 hover:bg-red-50 rounded-full transition-colors z-10 relative cursor-pointer"
-                             title="Delete Log"
-                           >
-                             <Trash2 className="w-4 h-4 pointer-events-none" />
-                           </button>
-                         )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm align-top">
+                         <button 
+                           type="button"
+                           onClick={(e) => handleDelete(e, log.id)}
+                           className="text-slate-300 hover:text-red-500 p-2 hover:bg-red-50 rounded-full transition-colors"
+                           title="Delete Log"
+                         >
+                           <Trash2 className="w-4 h-4" />
+                         </button>
                       </td>
                     </tr>
                   );
