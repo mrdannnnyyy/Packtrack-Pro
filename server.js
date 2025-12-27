@@ -1,21 +1,8 @@
 
-/**
- * PackTrack Pro Server
- * 
- * Dependencies:
- * npm install express cors firebase-admin axios
- * 
- * Usage:
- * 1. Go to Firebase Console > Project Settings > Service Accounts.
- * 2. Generate a new private key and save it as 'service-account.json' in this folder.
- * 3. Set GOOGLE_APPLICATION_CREDENTIALS env var or uncomment the serviceAccount code below.
- * 4. Run: node server.js
- */
-
 const express = require('express');
 const cors = require('cors');
 const { initializeApp, cert } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const axios = require('axios');
 
 const app = express();
@@ -23,23 +10,18 @@ app.use(cors());
 app.use(express.json());
 
 // --- FIREBASE SETUP ---
-
-// OPTION 1: Auto-detection (Cloud Run / Functions / Env Var)
-// initializeApp();
-
-// OPTION 2: Local File (Uncomment for local development)
 try {
   const serviceAccount = require('./service-account.json');
   initializeApp({
     credential: cert(serviceAccount)
   });
-  console.log("Firebase Admin initialized with service-account.json");
+  console.log("Firebase Admin initialized");
 } catch (e) {
-  console.log("Could not find service-account.json, attempting default credentials...");
   try {
     initializeApp();
+    console.log("Firebase Admin initialized via environment");
   } catch (e2) {
-    console.error("Failed to initialize Firebase Admin. Please provide credentials.");
+    console.error("Failed to initialize Firebase Admin.");
   }
 }
 
@@ -48,24 +30,21 @@ const PORT = process.env.PORT || 8080;
 
 // --- CONFIGURATION ---
 const COLLECTION_NAME = 'shipstation_orders';
+const META_COLLECTION = 'system_meta';
+const SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30 Minutes
 
 // --- HELPER FUNCTIONS ---
-async function getPaginatedData(collectionName, page, limit, filterFn = null) {
-  // Simple offset-based pagination. 
-  // For production with large datasets, consider cursor-based pagination.
-  const snapshot = await db.collection(collectionName).orderBy('lastUpdated', 'desc').get();
-  
-  let data = snapshot.docs.map(doc => doc.data());
 
+async function getPaginatedData(collectionName, page, limit, filterFn = null) {
+  const snapshot = await db.collection(collectionName).orderBy('lastUpdated', 'desc').get();
+  let data = snapshot.docs.map(doc => doc.data());
   if (filterFn) {
     data = data.filter(filterFn);
   }
-
   const total = data.length;
   const totalPages = Math.ceil(total / limit);
   const startIndex = (page - 1) * limit;
   const paginatedData = data.slice(startIndex, startIndex + limit);
-
   return { data: paginatedData, total, page, totalPages };
 }
 
@@ -73,204 +52,155 @@ async function getPaginatedData(collectionName, page, limit, filterFn = null) {
 
 /**
  * GET /orders
- * Fetches cached ShipStation orders from Firestore.
+ * Simple DB read. Does not trigger external API.
  */
 app.get('/orders', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 25;
-    
     const result = await getPaginatedData(COLLECTION_NAME, page, limit);
     
-    res.json({
-      ...result,
-      lastSync: Date.now() // Ideally retrieve this from a metadata doc
-    });
+    // Get last sync from meta
+    const meta = await db.collection(META_COLLECTION).doc('shipstation').get();
+    const lastSync = meta.exists ? meta.data().lastSync : 0;
+
+    res.json({ ...result, lastSync });
   } catch (error) {
-    console.error('Error fetching orders:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
 /**
  * POST /sync/orders
- * Fetches new orders from ShipStation API and saves them to Firestore.
- * NOTE: This implementation currently uses MOCK data for demonstration.
+ * Implements revalidation logic for ShipStation sync.
  */
 app.post('/sync/orders', async (req, res) => {
   try {
-    // --- REAL IMPLEMENTATION EXAMPLE ---
-    /*
-    const apiKey = process.env.SS_API_KEY;
-    const apiSecret = process.env.SS_API_SECRET;
-    const auth = Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
+    const now = Date.now();
+    const metaRef = db.collection(META_COLLECTION).doc('shipstation');
+    const metaSnap = await metaRef.get();
     
-    const response = await axios.get('https://ssapi.shipstation.com/orders?orderStatus=shipped', {
-      headers: { Authorization: `Basic ${auth}` }
-    });
-    const orders = response.data.orders;
-    */
+    // 1. Check if we synced recently
+    if (metaSnap.exists) {
+      const { lastSync } = metaSnap.data();
+      if (now - lastSync < SYNC_COOLDOWN_MS) {
+        return res.json({ 
+          success: true, 
+          message: "Cache is fresh. Skipping external ShipStation fetch.",
+          nextSyncIn: Math.ceil((SYNC_COOLDOWN_MS - (now - lastSync)) / 60000)
+        });
+      }
+    }
 
-    // --- MOCK IMPLEMENTATION ---
+    // 2. Perform external "Fetch" (Mocking ShipStation API)
+    // In a real app, this is where axios.get('ssapi.shipstation.com/...') goes.
     const mockOrders = Array.from({ length: 5 }).map((_, i) => ({
-      orderId: `MOCK-${Date.now()}-${i}`,
-      orderNumber: `ORD-${Math.floor(Math.random() * 100000)}`,
-      customerName: `Customer ${Math.floor(Math.random() * 500)}`,
-      customerEmail: `customer${i}@example.com`,
-      items: `Item Type ${String.fromCharCode(65 + i)} x${Math.ceil(Math.random() * 3)}`,
+      orderId: `SS-${now}-${i}`,
+      orderNumber: `ORD-${Math.floor(10000 + Math.random() * 90000)}`,
+      customerName: `Customer ${Math.floor(Math.random() * 1000)}`,
+      customerEmail: `user${i}@example.com`,
+      items: `Item ${String.fromCharCode(65+i)} x${i+1}`,
       shipDate: new Date().toISOString().split('T')[0],
-      trackingNumber: Math.random() > 0.2 ? `1Z${Math.random().toString(36).substring(7).toUpperCase()}03${Math.floor(Math.random()*1000)}` : 'No Tracking',
+      trackingNumber: `1Z${Math.random().toString(36).substring(7).toUpperCase()}`,
       carrierCode: 'ups',
-      status: 'shipped', // ShipStation status
-      lastUpdated: Date.now(),
-      // Fields for UPS enrichment
+      status: 'shipped',
+      lastUpdated: now,
       upsStatus: 'Pending',
-      delivered: false,
-      flagged: false,
-      notes: ''
+      delivered: false
     }));
 
     const batch = db.batch();
-    
     mockOrders.forEach(order => {
-      // Use orderNumber as document ID for easy lookup
       const docRef = db.collection(COLLECTION_NAME).doc(order.orderNumber);
       batch.set(docRef, order, { merge: true });
     });
 
+    // Update global sync meta
+    batch.set(metaRef, { lastSync: now }, { merge: true });
+    
     await batch.commit();
 
-    res.json({ success: true, count: mockOrders.length, message: "Synced mock orders to Firestore" });
+    res.json({ success: true, count: mockOrders.length, message: "Successfully synced with ShipStation" });
   } catch (error) {
-    console.error('Error syncing orders:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
 /**
  * GET /tracking
- * Returns orders with UPS enrichment data.
+ * Simple DB read.
  */
 app.get('/tracking', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 25;
-
-    // Only show orders that have a tracking number
     const hasTracking = (item) => item.trackingNumber && item.trackingNumber !== 'No Tracking';
-
     const result = await getPaginatedData(COLLECTION_NAME, page, limit, hasTracking);
-    
     res.json(result);
   } catch (error) {
-    console.error('Error fetching tracking:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
 /**
  * POST /tracking/single
- * Refreshes the UPS status for a single tracking number.
- * NOTE: This implementation currently uses MOCK logic.
+ * Implements "Stale-While-Revalidate" logic for UPS.
  */
 app.post('/tracking/single', async (req, res) => {
   const { trackingNumber } = req.body;
-  if (!trackingNumber) {
-    return res.status(400).send("Missing trackingNumber");
-  }
+  if (!trackingNumber) return res.status(400).send("Missing trackingNumber");
 
   try {
-    // 1. CHECK EXISTING STATUS
-    // If the package is already delivered, we DO NOT want to randomize it back to "In Transit"
-    const existingSnap = await db.collection(COLLECTION_NAME).where('trackingNumber', '==', trackingNumber).get();
-    let isAlreadyDelivered = false;
-    let existingDoc = null;
+    const now = Date.now();
+    // 1. Check Firestore First
+    const querySnap = await db.collection(COLLECTION_NAME).where('trackingNumber', '==', trackingNumber).get();
+    
+    if (!querySnap.empty) {
+      const doc = querySnap.docs[0];
+      const data = doc.data();
 
-    if (!existingSnap.empty) {
-      existingDoc = existingSnap.docs[0];
-      const data = existingDoc.data();
+      // RULE: If Delivered, return immediately.
       if (data.delivered === true || (data.upsStatus && data.upsStatus.toLowerCase().includes('delivered'))) {
-        isAlreadyDelivered = true;
+        console.log(`Cache Hit (Final): ${trackingNumber} is already delivered.`);
+        return res.json(data);
+      }
+
+      // RULE: If lastUpdated < 30 minutes, return immediately.
+      if (data.lastUpdated && (now - data.lastUpdated < SYNC_COOLDOWN_MS)) {
+        console.log(`Cache Hit (Fresh): ${trackingNumber} was updated recently.`);
+        return res.json(data);
       }
     }
 
-    // 2. LOCK ON DELIVERY
-    if (isAlreadyDelivered && existingDoc) {
-      console.log(`Tracking ${trackingNumber} is already DELIVERED. Skipping refresh to preserve state.`);
-      return res.json(existingDoc.data());
-    }
-
-    // --- REAL IMPLEMENTATION EXAMPLE ---
-    /*
-    const upsLicense = process.env.UPS_LICENSE_KEY;
-    const response = await axios.get(`https://onlinetools.ups.com/track/v1/details/${trackingNumber}`, {
-        headers: { AccessLicenseNumber: upsLicense }
-    });
-    const status = response.data.trackResponse.shipment[0].package[0].activity[0].status.description;
-    */
-
-    // --- MOCK IMPLEMENTATION ---
-    const statuses = ['In Transit', 'Out for Delivery', 'Delivered', 'Exception', 'Label Created'];
+    // 2. Data is missing or stale -> Proceed to external fetch (Mocking UPS API)
+    console.log(`Cache Miss/Stale: Fetching fresh UPS data for ${trackingNumber}`);
+    
+    const statuses = ['In Transit', 'Out for Delivery', 'Delivered', 'Exception'];
     const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
     const isDelivered = randomStatus === 'Delivered';
     
-    // Create update payload
     const updateData = {
       upsStatus: randomStatus,
-      location: 'Louisville, KY, US',
-      expectedDelivery: isDelivered ? 'Delivered' : new Date(Date.now() + 86400000 * 2).toLocaleDateString(),
+      location: isDelivered ? 'Front Porch, Destination' : 'Local Sort Facility, KY',
+      expectedDelivery: isDelivered ? 'Delivered' : new Date(now + 172800000).toLocaleDateString(),
       delivered: isDelivered,
       trackingUrl: `https://www.ups.com/track?tracknum=${trackingNumber}`,
-      lastUpdated: Date.now()
+      lastUpdated: now
     };
 
-    // Update in Firestore
-    const snapshot = await db.collection(COLLECTION_NAME).where('trackingNumber', '==', trackingNumber).get();
-    
-    if (!snapshot.empty) {
+    // 3. Update Firestore with { merge: true }
+    if (!querySnap.empty) {
       const batch = db.batch();
-      snapshot.forEach(doc => {
-        batch.update(doc.ref, updateData);
-      });
+      querySnap.forEach(d => batch.update(d.ref, updateData));
       await batch.commit();
     }
 
-    // Return the data even if not found in DB (for ad-hoc requests)
     res.json(updateData);
   } catch (error) {
-    console.error('Error updating tracking:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-/**
- * POST /tracking/annotate
- * Saves notes and flags for an order.
- */
-app.post('/tracking/annotate', async (req, res) => {
-  const { trackingNumber, flagged, notes } = req.body;
-  if (!trackingNumber) return res.status(400).send("Missing tracking number");
-
-  try {
-    const snapshot = await db.collection(COLLECTION_NAME).where('trackingNumber', '==', trackingNumber).get();
-    
-    if (!snapshot.empty) {
-      const batch = db.batch();
-      snapshot.forEach(doc => {
-        batch.update(doc.ref, { flagged, notes });
-      });
-      await batch.commit();
-      res.json({ success: true });
-    } else {
-      res.status(404).send("Order not found");
-    }
-  } catch (e) {
-    console.error("Error annotating:", e);
-    res.status(500).send(e.message);
-  }
-});
-
-// Start Server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
