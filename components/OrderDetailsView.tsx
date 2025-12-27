@@ -35,7 +35,7 @@ export const OrderDetailsView: React.FC<OrderDetailsViewProps> = ({
       const saved = localStorage.getItem('packtrack_order_cols');
       if (saved) return JSON.parse(saved);
     } catch (e) {}
-    return { order: 150, date: 120, customer: 250, items: 300, tracking: 180 };
+    return { order: 120, date: 100, customer: 200, items: 250, status: 140, tracking: 180 };
   });
 
   useEffect(() => {
@@ -77,6 +77,22 @@ export const OrderDetailsView: React.FC<OrderDetailsViewProps> = ({
     }
   };
 
+  const getStatusColor = (s: string) => {
+    const sl = (s || '').toLowerCase();
+    if (sl.includes('delivered')) return 'bg-green-100 text-green-700 border-green-200';
+    if (
+      sl.includes('transit') || 
+      sl.includes('way') || 
+      sl.includes('arrived') || 
+      sl.includes('pickup') || 
+      sl.includes('shipped') || 
+      sl.includes('out')
+    ) return 'bg-blue-100 text-blue-700 border-blue-200';
+    if (sl.includes('exception') || sl.includes('issue') || sl.includes('fail') || sl.includes('error')) 
+      return 'bg-red-100 text-red-700 border-red-200';
+    return 'bg-slate-100 text-slate-500 border-slate-200';
+  };
+
   const filteredOrders = orders.filter(o => {
     const s = filterText.toLowerCase();
     return (
@@ -84,7 +100,8 @@ export const OrderDetailsView: React.FC<OrderDetailsViewProps> = ({
       (o.customerName || '').toLowerCase().includes(s) ||
       (o.customerEmail || '').toLowerCase().includes(s) ||
       (o.items || '').toLowerCase().includes(s) ||
-      (o.trackingNumber || '').toLowerCase().includes(s)
+      (o.trackingNumber || '').toLowerCase().includes(s) ||
+      (o.orderStatus || '').toLowerCase().includes(s)
     );
   });
 
@@ -142,6 +159,7 @@ export const OrderDetailsView: React.FC<OrderDetailsViewProps> = ({
                { key: 'date', label: 'Date' },
                { key: 'customer', label: 'Customer' },
                { key: 'items', label: 'Items' },
+               { key: 'status', label: 'Status' },
                { key: 'tracking', label: 'Tracking' }
              ].map(col => (
                <div key={col.key} className="relative px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase flex-shrink-0 select-none hover:bg-slate-100" style={{ width: colWidths[col.key as keyof typeof colWidths] }}>
@@ -166,6 +184,11 @@ export const OrderDetailsView: React.FC<OrderDetailsViewProps> = ({
                      <div className="text-xs text-slate-400 flex items-center gap-1 truncate" title={o.customerEmail}><Mail className="w-3 h-3"/> {o.customerEmail}</div>
                   </div>
                   <div className="px-6 py-4 text-sm text-slate-600 flex-shrink-0 truncate" title={o.items} style={{ width: colWidths.items }}>{o.items}</div>
+                  <div className="px-6 py-4 flex-shrink-0 truncate" style={{ width: colWidths.status }}>
+                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border tracking-wide truncate max-w-full ${getStatusColor(o.orderStatus || 'shipped')}`}>
+                       {o.orderStatus || 'Shipped'}
+                    </span>
+                  </div>
                   <div className="px-6 py-4 text-sm font-mono text-slate-600 flex-shrink-0 truncate" style={{ width: colWidths.tracking }}>
                     {o.trackingNumber !== 'No Tracking' ? (
                        <a href={`https://www.ups.com/track?tracknum=${o.trackingNumber}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-blue-600 hover:underline">

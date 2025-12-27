@@ -120,7 +120,7 @@ export const ShipmentTrackingView: React.FC<ShipmentTrackingViewProps> = () => {
   const filteredOrders = orders.filter(order => {
     const statusLower = (order.status || '').toLowerCase(); // Safety check
     const isDelivered = order.delivered;
-    const isException = statusLower.includes('exception') || statusLower.includes('error') || statusLower.includes('failed');
+    const isException = statusLower.includes('exception') || statusLower.includes('error') || statusLower.includes('failed') || statusLower.includes('issue');
     
     // Tab Filter
     let matchesTab = false;
@@ -141,12 +141,21 @@ export const ShipmentTrackingView: React.FC<ShipmentTrackingViewProps> = () => {
   });
 
   const getStatusColor = (status: string | null | undefined) => {
-    const s = (status || '').toLowerCase();
-    if (s.includes('delivered')) return 'bg-green-100 text-green-700 border-green-200';
-    if (s.includes('transit') || s.includes('shipped') || s.includes('pickup') || s.includes('out')) return 'bg-blue-100 text-blue-700 border-blue-200';
-    if (s.includes('exception') || s.includes('error') || s.includes('failed')) return 'bg-red-100 text-red-700 border-red-200';
-    if (s.includes('not shipped') || s.includes('unknown') || !s) return 'bg-slate-100 text-slate-500 border-slate-200';
-    return 'bg-amber-50 text-amber-600 border-amber-200';
+    const sl = (status || '').toLowerCase();
+    
+    if (sl.includes('delivered')) return 'bg-green-100 text-green-700 border-green-200';
+    if (
+      sl.includes('transit') || 
+      sl.includes('way') || 
+      sl.includes('arrived') || 
+      sl.includes('pickup') || 
+      sl.includes('shipped') || 
+      sl.includes('out')
+    ) return 'bg-blue-100 text-blue-700 border-blue-200';
+    if (sl.includes('exception') || sl.includes('error') || sl.includes('failed') || sl.includes('issue')) 
+      return 'bg-red-100 text-red-700 border-red-200';
+    
+    return 'bg-slate-100 text-slate-500 border-slate-200';
   };
 
   return (
@@ -319,7 +328,7 @@ export const ShipmentTrackingView: React.FC<ShipmentTrackingViewProps> = () => {
                       {/* STATUS */}
                       <div className="px-6 py-4 whitespace-nowrap flex-shrink-0" style={{ width: colWidths.status }}>
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(order.status)}`}>
-                             {order.status || 'Unknown'}
+                             {order.status || 'N/A'}
                           </span>
                       </div>
 

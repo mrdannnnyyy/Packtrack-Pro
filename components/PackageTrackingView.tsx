@@ -120,12 +120,40 @@ export const PackageTrackingView: React.FC<PackageTrackingViewProps> = ({
     }
   };
 
+  // REFACTORED STATUS COLOR MAPPING
   const getStatusColor = (s: string) => {
-    const sl = (s||'').toLowerCase();
+    const sl = (s || '').toLowerCase();
+    
+    // 1. DELIVERED (Green)
     if (sl.includes('delivered')) return 'bg-green-100 text-green-700 border-green-200';
-    if (sl.includes('transit') || sl.includes('out') || sl.includes('shipped') || sl.includes('pickup')) return 'bg-blue-100 text-blue-700 border-blue-200';
-    if (sl.includes('exception') || sl.includes('fail') || sl.includes('error')) return 'bg-red-100 text-red-700 border-red-200';
-    return 'bg-slate-100 text-slate-600 border-slate-200';
+    
+    // 2. ACTIVE SHIPMENTS (Blue)
+    if (
+      sl.includes('transit') || 
+      sl.includes('way') || 
+      sl.includes('arrived') || 
+      sl.includes('pickup') || 
+      sl.includes('shipped') || 
+      sl.includes('out') ||
+      sl.includes('ready')
+    ) return 'bg-blue-100 text-blue-700 border-blue-200';
+    
+    // 3. ISSUES (Red)
+    if (
+      sl.includes('exception') || 
+      sl.includes('issue') || 
+      sl.includes('fail') || 
+      sl.includes('error') || 
+      sl.includes('return') ||
+      sl.includes('void')
+    ) return 'bg-red-100 text-red-700 border-red-200';
+    
+    // 4. PRE-SHIPPING / INITIAL (Slate/Gray)
+    if (sl.includes('label') || sl.includes('pending') || sl.includes('created'))
+      return 'bg-slate-100 text-slate-500 border-slate-200';
+    
+    // Default Fallback
+    return 'bg-slate-50 text-slate-400 border-slate-200';
   };
 
   const filteredRows = mergedRows.filter(r => {
@@ -135,7 +163,7 @@ export const PackageTrackingView: React.FC<PackageTrackingViewProps> = ({
 
     const statusLower = (r.upsStatus || '').toLowerCase();
     const isDelivered = statusLower.includes('delivered');
-    const isException = statusLower.includes('exception') || statusLower.includes('error') || statusLower.includes('fail');
+    const isException = statusLower.includes('exception') || statusLower.includes('error') || statusLower.includes('fail') || statusLower.includes('issue');
     const isFlaggedItem = r.flagged === true;
 
     switch (activeTab) {
@@ -242,7 +270,9 @@ export const PackageTrackingView: React.FC<PackageTrackingViewProps> = ({
                         </div>
                       </div>
                       <div className="px-6 py-3 flex-shrink-0 overflow-hidden" style={{ width: colWidths.status }}>
-                        <span className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border tracking-wide truncate max-w-full ${getStatusColor(r.upsStatus)}`} title={r.upsStatus}>{r.upsStatus || 'Pending'}</span>
+                        <span className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border tracking-wide truncate max-w-full ${getStatusColor(r.upsStatus)}`} title={r.upsStatus}>
+                          {r.upsStatus || 'N/A'}
+                        </span>
                       </div>
                       <div className="px-6 py-3 flex-shrink-0 overflow-hidden" style={{ width: colWidths.loc }}><p className={`text-slate-600 truncate ${getDynamicTextClass(r.location || '', 25)}`} title={r.location}>{r.location || '-'}</p></div>
                       <div className="px-6 py-3 flex-shrink-0 overflow-hidden" style={{ width: colWidths.eta }}><p className="text-sm font-medium text-slate-700 truncate">{r.expectedDelivery}</p><p className="text-[10px] text-slate-400 mt-0.5">{r.lastUpdated ? new Date(r.lastUpdated).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}</p></div>
