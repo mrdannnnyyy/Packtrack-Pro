@@ -50,37 +50,56 @@ async function getPaginatedData(collectionName, page, limit, filterFn = null) {
 
 // --- API ROUTES ---
 
-/**
- * GET /orders
- * Simple DB read. Does not trigger external API.
- */
 app.get('/orders', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 25;
-    const result = await getPaginatedData(COLLECTION_NAME, page, limit);
+    const statusFilter = req.query.status;
     
-    // Get last sync from meta
+    const filter = (item) => {
+      // If filtering for issues/exception, include manually flagged items
+      if (statusFilter === 'Issues' || statusFilter === 'Exception') {
+        if (item.flagged === true) return true;
+      }
+      
+      if (!statusFilter) return true;
+      const status = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
+      return status.includes(statusFilter.toLowerCase());
+    };
+
+    const result = await getPaginatedData(COLLECTION_NAME, page, limit, filter);
     const meta = await db.collection(META_COLLECTION).doc('shipstation').get();
     const lastSync = meta.exists ? meta.data().lastSync : 0;
-
     res.json({ ...result, lastSync });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-/**
- * POST /sync/orders
- * Implements revalidation logic for ShipStation sync.
- */
+// NEW: Persistent Flagging Endpoint
+app.post('/flag', async (req, res) => {
+  const { trackingNumber, orderNumber, flagged } = req.body;
+  if (!orderNumber) return res.status(400).send("Missing orderNumber");
+
+  try {
+    const docRef = db.collection(COLLECTION_NAME).doc(orderNumber);
+    await docRef.set({ 
+      flagged: !!flagged,
+      lastUpdated: Date.now() 
+    }, { merge: true });
+    
+    res.json({ success: true, flagged: !!flagged });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/sync/orders', async (req, res) => {
   try {
     const now = Date.now();
     const metaRef = db.collection(META_COLLECTION).doc('shipstation');
     const metaSnap = await metaRef.get();
     
-    // 1. Check if we synced recently
     if (metaSnap.exists) {
       const { lastSync } = metaSnap.data();
       if (now - lastSync < SYNC_COOLDOWN_MS) {
@@ -92,8 +111,6 @@ app.post('/sync/orders', async (req, res) => {
       }
     }
 
-    // 2. Perform external "Fetch" (Mocking ShipStation API)
-    // In a real app, this is where axios.get('ssapi.shipstation.com/...') goes.
     const mockOrders = Array.from({ length: 5 }).map((_, i) => ({
       orderId: `SS-${now}-${i}`,
       orderNumber: `ORD-${Math.floor(10000 + Math.random() * 90000)}`,
@@ -106,7 +123,8 @@ app.post('/sync/orders', async (req, res) => {
       status: 'shipped',
       lastUpdated: now,
       upsStatus: 'Pending',
-      delivered: false
+      delivered: false,
+      flagged: false
     }));
 
     const batch = db.batch();
@@ -115,66 +133,60 @@ app.post('/sync/orders', async (req, res) => {
       batch.set(docRef, order, { merge: true });
     });
 
-    // Update global sync meta
     batch.set(metaRef, { lastSync: now }, { merge: true });
-    
     await batch.commit();
-
     res.json({ success: true, count: mockOrders.length, message: "Successfully synced with ShipStation" });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-/**
- * GET /tracking
- * Simple DB read.
- */
 app.get('/tracking', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 25;
-    const hasTracking = (item) => item.trackingNumber && item.trackingNumber !== 'No Tracking';
-    const result = await getPaginatedData(COLLECTION_NAME, page, limit, hasTracking);
+    const statusFilter = req.query.status;
+    
+    const filter = (item) => {
+      const validTracking = item.trackingNumber && item.trackingNumber !== 'No Tracking';
+      if (!validTracking) return false;
+
+      // If filtering for issues/exception, include manually flagged items
+      if (statusFilter === 'Issues' || statusFilter === 'Exception') {
+        if (item.flagged === true) return true;
+      }
+
+      if (!statusFilter) return true;
+      const status = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
+      return status.includes(statusFilter.toLowerCase());
+    };
+
+    const result = await getPaginatedData(COLLECTION_NAME, page, limit, filter);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-/**
- * POST /tracking/single
- * Implements "Stale-While-Revalidate" logic for UPS.
- */
 app.post('/tracking/single', async (req, res) => {
   const { trackingNumber } = req.body;
   if (!trackingNumber) return res.status(400).send("Missing trackingNumber");
 
   try {
     const now = Date.now();
-    // 1. Check Firestore First
     const querySnap = await db.collection(COLLECTION_NAME).where('trackingNumber', '==', trackingNumber).get();
     
     if (!querySnap.empty) {
       const doc = querySnap.docs[0];
       const data = doc.data();
-
-      // RULE: If Delivered, return immediately.
       if (data.delivered === true || (data.upsStatus && data.upsStatus.toLowerCase().includes('delivered'))) {
-        console.log(`Cache Hit (Final): ${trackingNumber} is already delivered.`);
         return res.json(data);
       }
-
-      // RULE: If lastUpdated < 30 minutes, return immediately.
       if (data.lastUpdated && (now - data.lastUpdated < SYNC_COOLDOWN_MS)) {
-        console.log(`Cache Hit (Fresh): ${trackingNumber} was updated recently.`);
         return res.json(data);
       }
     }
 
-    // 2. Data is missing or stale -> Proceed to external fetch (Mocking UPS API)
-    console.log(`Cache Miss/Stale: Fetching fresh UPS data for ${trackingNumber}`);
-    
     const statuses = ['In Transit', 'Out for Delivery', 'Delivered', 'Exception'];
     const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
     const isDelivered = randomStatus === 'Delivered';
@@ -188,13 +200,11 @@ app.post('/tracking/single', async (req, res) => {
       lastUpdated: now
     };
 
-    // 3. Update Firestore with { merge: true }
     if (!querySnap.empty) {
       const batch = db.batch();
       querySnap.forEach(d => batch.update(d.ref, updateData));
       await batch.commit();
     }
-
     res.json(updateData);
   } catch (error) {
     res.status(500).json({ error: error.message });

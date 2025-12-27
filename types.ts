@@ -51,6 +51,7 @@ export interface EnrichedOrder {
   delivered: boolean;
   trackingUrl: string;
   logDate?: string | null;
+  labelCost?: number; // Added labelCost field
 }
 
 export interface PaginatedResponse {

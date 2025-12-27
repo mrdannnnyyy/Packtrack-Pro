@@ -22,7 +22,7 @@ const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loginTimestamp, setLoginTimestamp] = useState<number | undefined>(undefined);
   
-  // --- NEW: REMOTE DATA STATE ---
+  // --- REMOTE DATA STATE ---
   const [remoteData, setRemoteData] = useState<any[]>([]);
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [remotePage, setRemotePage] = useState(1);
@@ -30,25 +30,39 @@ const App: React.FC = () => {
   const [remoteTotal, setRemoteTotal] = useState(0);
   const [lastSync, setLastSync] = useState(0);
   const [remoteError, setRemoteError] = useState<string | null>(null);
+  // Default status for Tracking tab is "Active"
+  const [remoteStatus, setRemoteStatus] = useState<string | null>(null);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(typeof window !== 'undefined' ? window.innerWidth >= 768 : true);
   const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; message: string; onConfirm: () => void } | null>(null);
   const [dbError, setDbError] = useState<string | null>(null);
 
   // --- DYNAMIC FETCHING LOGIC ---
-  const fetchRemoteData = useCallback(async (pageNum: number) => {
+  const fetchRemoteData = useCallback(async (pageNum: number, status?: string | null) => {
     if (activeTab !== Tab.ORDERS && activeTab !== Tab.TRACKING) return;
     
     setRemoteLoading(true);
     setRemoteError(null);
     try {
       let res;
+      // Determine effective status: passed param takes precedence over state
+      const effectiveStatus = status !== undefined ? status : remoteStatus;
+      
+      // Map Tab to specific endpoint and use provided status filters
       if (activeTab === Tab.TRACKING) {
-        // Call the /tracking endpoint
-        res = await fetchTrackingList(pageNum, 25);
+        // Fetch from /tracking with optional status=Active|Delivered|Issues
+        res = await fetchTrackingList(
+          pageNum, 
+          effectiveStatus === 'Delivered' ? 50 : 25, 
+          effectiveStatus || undefined
+        );
       } else {
-        // Default to /orders endpoint
-        res = await fetchOrders(pageNum, 25);
+        // Fetch from /orders with optional status=Active|Delivered|Issues
+        res = await fetchOrders(
+          pageNum, 
+          effectiveStatus === 'Delivered' ? 50 : 25, 
+          effectiveStatus || undefined
+        );
       }
       
       setRemoteData(res.data || []);
@@ -61,22 +75,32 @@ const App: React.FC = () => {
     } finally {
       setRemoteLoading(false);
     }
-  }, [activeTab]);
+  }, [activeTab, remoteStatus]);
 
-  // Handle Tab Changes: Reset Pagination and Fetch
+  // Handle Main Sidebar Tab Changes
   useEffect(() => {
     if (activeTab === Tab.ORDERS || activeTab === Tab.TRACKING) {
       setRemotePage(1);
-      fetchRemoteData(1);
+      // Reset status to "Active" by default for Tracking, null for Orders (All)
+      const defaultStatus = activeTab === Tab.TRACKING ? 'Active' : null;
+      setRemoteStatus(defaultStatus);
+      fetchRemoteData(1, defaultStatus);
     }
-  }, [activeTab, fetchRemoteData]);
+  }, [activeTab]);
+
+  // Handle Sub-Status Changes (e.g. from PackageTrackingView tabs)
+  const handleStatusChange = (status: string | null) => {
+    setRemoteStatus(status);
+    setRemotePage(1);
+    fetchRemoteData(1, status);
+  };
 
   // Handle Page Changes
   useEffect(() => {
     if (remotePage > 1) {
-       fetchRemoteData(remotePage);
+       fetchRemoteData(remotePage, remoteStatus);
     }
-  }, [remotePage, fetchRemoteData]);
+  }, [remotePage]);
 
   // APP INITIALIZATION: Firestore Subscriptions
   useEffect(() => {
@@ -184,7 +208,7 @@ const App: React.FC = () => {
         <div className="p-6 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Box className="text-white w-6 h-6 bg-blue-600 p-1 rounded" />
-            <h1 className="text-xl font-bold text-white tracking-tight">PackTrack</h1>
+            <h1 className="text-xl font-bold text-white tracking-tight">PackTrack Pro</h1>
           </div>
           <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-white"><X className="w-6 h-6" /></button>
         </div>
@@ -291,6 +315,8 @@ const App: React.FC = () => {
               setPage={setRemotePage} 
               totalPages={remoteTotalPages}
               onRefresh={() => fetchRemoteData(remotePage)}
+              activeStatusFilter={remoteStatus}
+              onStatusFilterChange={handleStatusChange}
             />
           )}
 

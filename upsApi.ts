@@ -26,9 +26,14 @@ export interface TrackingResponse {
   totalPages: number;
 }
 
-export async function fetchTrackingList(page: number = 1, limit: number = 25): Promise<TrackingResponse> {
+export async function fetchTrackingList(page: number = 1, limit: number = 25, status?: string): Promise<TrackingResponse> {
   try {
-    const response = await fetch(`${BACKEND_URL}/tracking?page=${page}&limit=${limit}`);
+    const url = new URL(`${BACKEND_URL}/tracking`);
+    url.searchParams.append('page', page.toString());
+    url.searchParams.append('limit', limit.toString());
+    if (status) url.searchParams.append('status', status);
+
+    const response = await fetch(url.toString());
     if (!response.ok) throw new Error("Failed to fetch tracking");
     return response.json();
   } catch (e) {
@@ -52,9 +57,29 @@ export async function refreshSingleTracking(trackingNumber: string): Promise<Par
   }
 }
 
-export async function fetchEnrichedOrders(page: number = 1, limit: number = 25): Promise<PaginatedResponse> {
+// Persistently flag an order in the backend database
+export async function toggleOrderFlag(trackingNumber: string, orderNumber: string, flagged: boolean): Promise<any> {
   try {
-    const response = await fetch(`${BACKEND_URL}/tracking?page=${page}&limit=${limit}`);
+    const response = await fetch(`${BACKEND_URL}/flag`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trackingNumber, orderNumber, flagged })
+    });
+    return response.json();
+  } catch (e) {
+    console.error("Flag API Error:", e);
+    throw e;
+  }
+}
+
+export async function fetchEnrichedOrders(page: number = 1, limit: number = 25, status?: string): Promise<PaginatedResponse> {
+  try {
+    const url = new URL(`${BACKEND_URL}/tracking`);
+    url.searchParams.append('page', page.toString());
+    url.searchParams.append('limit', limit.toString());
+    if (status) url.searchParams.append('status', status);
+
+    const response = await fetch(url.toString());
     if (!response.ok) throw new Error("Failed to fetch enriched orders");
     return response.json();
   } catch (e) {

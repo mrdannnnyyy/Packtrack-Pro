@@ -4,7 +4,7 @@ import { BasicOrder, syncOrders } from '../shipstationApi';
 import { ShoppingBag, RefreshCw, ChevronLeft, ChevronRight, Mail, ExternalLink, CloudDownload, AlertCircle, Search } from 'lucide-react';
 
 interface OrderDetailsViewProps {
-  orders: BasicOrder[];
+  orders: any[]; // Changed to any[] for robust field checking
   loading: boolean;
   error: string | null;
   page: number;
@@ -77,6 +77,13 @@ export const OrderDetailsView: React.FC<OrderDetailsViewProps> = ({
     }
   };
 
+  // ROBUST STATUS FINDER
+  const getRealStatus = (row: any) => {
+    const candidate = row.upsStatus || row.status || row.orderStatus || "";
+    if (typeof candidate !== 'string') return "";
+    return candidate.trim();
+  };
+
   const getStatusColor = (s: string) => {
     const sl = (s || '').toLowerCase();
     if (sl.includes('delivered')) return 'bg-green-100 text-green-700 border-green-200';
@@ -95,13 +102,14 @@ export const OrderDetailsView: React.FC<OrderDetailsViewProps> = ({
 
   const filteredOrders = orders.filter(o => {
     const s = filterText.toLowerCase();
+    const currentStatus = getRealStatus(o);
     return (
       (o.orderNumber || '').toLowerCase().includes(s) ||
       (o.customerName || '').toLowerCase().includes(s) ||
       (o.customerEmail || '').toLowerCase().includes(s) ||
       (o.items || '').toLowerCase().includes(s) ||
       (o.trackingNumber || '').toLowerCase().includes(s) ||
-      (o.orderStatus || '').toLowerCase().includes(s)
+      currentStatus.toLowerCase().includes(s)
     );
   });
 
@@ -175,29 +183,32 @@ export const OrderDetailsView: React.FC<OrderDetailsViewProps> = ({
             ) : filteredOrders.length === 0 ? (
                <div className="p-12 text-center text-slate-400">No matching orders found.</div>
             ) : (
-              filteredOrders.map((o, i) => (
-                <div key={`${o.orderId}-${i}`} className="flex hover:bg-slate-50 transition-colors items-center">
-                  <div className="px-6 py-4 text-sm font-bold text-slate-800 flex-shrink-0 truncate" style={{ width: colWidths.order }}>{o.orderNumber}</div>
-                  <div className="px-6 py-4 text-sm text-slate-600 flex-shrink-0 truncate" style={{ width: colWidths.date }}>{o.shipDate}</div>
-                  <div className="px-6 py-4 flex-shrink-0 truncate" style={{ width: colWidths.customer }}>
-                     <div className="text-sm font-medium text-slate-800 truncate" title={o.customerName}>{o.customerName}</div>
-                     <div className="text-xs text-slate-400 flex items-center gap-1 truncate" title={o.customerEmail}><Mail className="w-3 h-3"/> {o.customerEmail}</div>
+              filteredOrders.map((o, i) => {
+                const currentStatus = getRealStatus(o);
+                return (
+                  <div key={`${o.orderId}-${i}`} className="flex hover:bg-slate-50 transition-colors items-center">
+                    <div className="px-6 py-4 text-sm font-bold text-slate-800 flex-shrink-0 truncate" style={{ width: colWidths.order }}>{o.orderNumber}</div>
+                    <div className="px-6 py-4 text-sm text-slate-600 flex-shrink-0 truncate" style={{ width: colWidths.date }}>{o.shipDate}</div>
+                    <div className="px-6 py-4 flex-shrink-0 truncate" style={{ width: colWidths.customer }}>
+                       <div className="text-sm font-medium text-slate-800 truncate" title={o.customerName}>{o.customerName}</div>
+                       <div className="text-xs text-slate-400 flex items-center gap-1 truncate" title={o.customerEmail}><Mail className="w-3 h-3"/> {o.customerEmail}</div>
+                    </div>
+                    <div className="px-6 py-4 text-sm text-slate-600 flex-shrink-0 truncate" title={o.items} style={{ width: colWidths.items }}>{o.items}</div>
+                    <div className="px-6 py-4 flex-shrink-0 truncate" style={{ width: colWidths.status }}>
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border tracking-wide truncate max-w-full ${getStatusColor(currentStatus)}`}>
+                         {currentStatus ? currentStatus.toUpperCase() : 'SHIPPED'}
+                      </span>
+                    </div>
+                    <div className="px-6 py-4 text-sm font-mono text-slate-600 flex-shrink-0 truncate" style={{ width: colWidths.tracking }}>
+                      {o.trackingNumber !== 'No Tracking' ? (
+                         <a href={`https://www.ups.com/track?tracknum=${o.trackingNumber}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-blue-600 hover:underline">
+                           {o.trackingNumber} <ExternalLink className="w-3 h-3" />
+                         </a>
+                      ) : <span className="text-slate-400">No Tracking</span>}
+                    </div>
                   </div>
-                  <div className="px-6 py-4 text-sm text-slate-600 flex-shrink-0 truncate" title={o.items} style={{ width: colWidths.items }}>{o.items}</div>
-                  <div className="px-6 py-4 flex-shrink-0 truncate" style={{ width: colWidths.status }}>
-                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border tracking-wide truncate max-w-full ${getStatusColor(o.orderStatus || 'shipped')}`}>
-                       {o.orderStatus || 'Shipped'}
-                    </span>
-                  </div>
-                  <div className="px-6 py-4 text-sm font-mono text-slate-600 flex-shrink-0 truncate" style={{ width: colWidths.tracking }}>
-                    {o.trackingNumber !== 'No Tracking' ? (
-                       <a href={`https://www.ups.com/track?tracknum=${o.trackingNumber}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-blue-600 hover:underline">
-                         {o.trackingNumber} <ExternalLink className="w-3 h-3" />
-                       </a>
-                    ) : <span className="text-slate-400">No Tracking</span>}
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

@@ -23,9 +23,14 @@ export interface OrderResponse {
   lastSync: number;
 }
 
-export async function fetchOrders(page: number = 1, limit: number = 25): Promise<OrderResponse> {
+export async function fetchOrders(page: number = 1, limit: number = 25, status?: string): Promise<OrderResponse> {
   try {
-    const response = await fetch(`${BACKEND_URL}/orders?page=${page}&limit=${limit}`);
+    const url = new URL(`${BACKEND_URL}/orders`);
+    url.searchParams.append('page', page.toString());
+    url.searchParams.append('limit', limit.toString());
+    if (status) url.searchParams.append('status', status);
+
+    const response = await fetch(url.toString());
     if (!response.ok) throw new Error("Failed to fetch orders");
     return response.json();
   } catch (e) {
