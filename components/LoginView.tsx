@@ -1,7 +1,8 @@
+
 import React, { useState } from 'react';
 import { User } from '../types';
 import { addUser } from '../firebase';
-import { ShieldCheck, User as UserIcon, Delete, ArrowRight, Lock } from 'lucide-react';
+import { ShieldCheck, User as UserIcon, Delete, ArrowRight, Lock, Key } from 'lucide-react';
 
 interface LoginViewProps {
   users: User[];
@@ -11,22 +12,24 @@ interface LoginViewProps {
 export const LoginView: React.FC<LoginViewProps> = ({ users, onLogin }) => {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [pin, setPin] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   
   // First Run State (Create Admin)
   const [newAdminName, setNewAdminName] = useState('');
-  const [newAdminPin, setNewAdminPin] = useState('');
+  const [newAdminPassword, setNewAdminPassword] = useState('');
 
   // --- LOGIC: CREATE FIRST ADMIN ---
   if (users.length === 0) {
     const handleCreateAdmin = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!newAdminName.trim() || newAdminPin.length !== 4) return;
+      if (!newAdminName.trim() || !newAdminPassword.trim()) return;
       
       const adminData = {
         name: newAdminName,
         role: 'ADMIN' as const,
-        pin: newAdminPin
+        pin: '', // No PIN for Admin
+        password: newAdminPassword
       };
       
       // Add to Firestore
@@ -61,22 +64,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ users, onLogin }) => {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Create 4-Digit PIN</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Create Password</label>
               <input 
-                type="text" 
-                inputMode="numeric"
-                maxLength={4}
+                type="password" 
                 required
-                pattern="\d{4}"
-                className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-center text-lg tracking-widest"
-                placeholder="0000"
-                value={newAdminPin}
-                onChange={e => setNewAdminPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="Secure Password"
+                value={newAdminPassword}
+                onChange={e => setNewAdminPassword(e.target.value)}
               />
             </div>
             <button 
               type="submit"
-              disabled={!newAdminName || newAdminPin.length !== 4}
+              disabled={!newAdminName || !newAdminPassword}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
             >
               Setup System <ArrowRight className="w-5 h-5" />
@@ -101,9 +101,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ users, onLogin }) => {
     setError('');
   };
 
-  const handleLoginSubmit = () => {
+  const handlePinSubmit = () => {
     if (!selectedUser) return;
-    
     if (selectedUser.pin === pin) {
       onLogin(selectedUser);
     } else {
@@ -113,10 +112,33 @@ export const LoginView: React.FC<LoginViewProps> = ({ users, onLogin }) => {
   };
 
   // If PIN reaches 4 digits, auto-submit
-  if (pin.length === 4 && !error) {
-     // Small timeout to let the UI update the 4th box before submitting
-     setTimeout(() => handleLoginSubmit(), 200);
+  if ((selectedUser?.role === 'USER' || selectedUser?.role === 'SUPPORT') && pin.length === 4 && !error) {
+     setTimeout(() => handlePinSubmit(), 200);
   }
+
+  const handlePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUser) return;
+
+    // Check against password field OR fallback to PIN field (for legacy admins)
+    const validPassword = selectedUser.password || selectedUser.pin;
+    
+    if (password === validPassword) {
+      onLogin(selectedUser);
+    } else {
+      setError('Incorrect Password');
+      setPassword('');
+    }
+  };
+
+  const selectUser = (user: User) => {
+    setSelectedUser(user);
+    setPin('');
+    setPassword('');
+    setError('');
+  };
+
+  const isPinUser = selectedUser?.role === 'USER' || selectedUser?.role === 'SUPPORT';
 
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
@@ -132,11 +154,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ users, onLogin }) => {
             {users.map(user => (
               <button
                 key={user.id}
-                onClick={() => {
-                  setSelectedUser(user);
-                  setPin('');
-                  setError('');
-                }}
+                onClick={() => selectUser(user)}
                 className={`w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all duration-200 text-left group
                   ${selectedUser?.id === user.id 
                     ? 'border-blue-500 bg-white shadow-md ring-2 ring-blue-100' 
@@ -144,14 +162,18 @@ export const LoginView: React.FC<LoginViewProps> = ({ users, onLogin }) => {
                   }`}
               >
                 <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold transition-colors
-                  ${selectedUser?.id === user.id ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500 group-hover:bg-slate-300'}`}>
+                  ${selectedUser?.id === user.id ? 'bg-blue-600 text-white' : 
+                    user.role === 'ADMIN' ? 'bg-purple-200 text-purple-600' : 
+                    user.role === 'SUPPORT' ? 'bg-emerald-200 text-emerald-600' : 'bg-slate-200 text-slate-500 group-hover:bg-slate-300'}`}>
                   {user.name.charAt(0).toUpperCase()}
                 </div>
                 <div>
                   <p className={`font-bold text-lg ${selectedUser?.id === user.id ? 'text-slate-800' : 'text-slate-600'}`}>
                     {user.name}
                   </p>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${user.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-500'}`}>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium 
+                    ${user.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 
+                      user.role === 'SUPPORT' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                     {user.role}
                   </span>
                 </div>
@@ -160,7 +182,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ users, onLogin }) => {
           </div>
         </div>
 
-        {/* Right Side: PIN Pad */}
+        {/* Right Side: Auth Pad */}
         <div className="w-full md:w-1/2 p-6 md:p-8 flex flex-col items-center justify-center bg-white relative">
           
           {!selectedUser ? (
@@ -170,67 +192,95 @@ export const LoginView: React.FC<LoginViewProps> = ({ users, onLogin }) => {
              </div>
           ) : (
             <div className="w-full max-w-xs space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
-              <div className="text-center space-y-4">
-                <h3 className="text-xl font-medium text-slate-600">Enter PIN for <span className="text-slate-900 font-bold">{selectedUser.name}</span></h3>
-                
-                {/* Visual PIN Display with Numbers */}
-                <div className="flex justify-center gap-4 items-center">
-                  {[0, 1, 2, 3].map(i => (
-                    <div 
-                      key={i}
-                      className={`w-14 h-16 rounded-xl flex items-center justify-center text-3xl font-bold border-2 transition-all duration-150
-                        ${i < pin.length 
-                          ? 'border-blue-500 bg-blue-50 text-blue-600' 
-                          : 'border-slate-200 bg-white text-slate-300'}
-                        ${error ? 'border-red-400 bg-red-50 text-red-500' : ''}
-                      `}
-                    >
-                      {pin[i] || (
-                        <div className="w-2 h-2 rounded-full bg-slate-300"></div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                
-                <div className="h-6 flex items-center justify-center">
-                   {error && <p className="text-red-500 text-sm font-medium animate-pulse">{error}</p>}
-                </div>
+              <div className="text-center space-y-2">
+                 <h3 className="text-xl font-medium text-slate-600">
+                   {isPinUser ? 'Enter PIN' : 'Enter Password'} for <span className="text-slate-900 font-bold">{selectedUser.name}</span>
+                 </h3>
+                 <div className="h-6 flex items-center justify-center">
+                    {error && <p className="text-red-500 text-sm font-medium animate-pulse">{error}</p>}
+                 </div>
               </div>
 
-              {/* Number Pad */}
-              <div className="grid grid-cols-3 gap-4">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+              {/* RENDER BASED ON ROLE */}
+              {isPinUser ? (
+                <>
+                  {/* PIN DISPLAY */}
+                  <div className="flex justify-center gap-4 items-center mb-6">
+                    {[0, 1, 2, 3].map(i => (
+                      <div 
+                        key={i}
+                        className={`w-14 h-16 rounded-xl flex items-center justify-center text-3xl font-bold border-2 transition-all duration-150
+                          ${i < pin.length 
+                            ? 'border-blue-500 bg-blue-50 text-blue-600' 
+                            : 'border-slate-200 bg-white text-slate-300'}
+                          ${error ? 'border-red-400 bg-red-50 text-red-500' : ''}
+                        `}
+                      >
+                        {pin[i] || <div className="w-2 h-2 rounded-full bg-slate-300"></div>}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* NUM PAD */}
+                  <div className="grid grid-cols-3 gap-4">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+                      <button
+                        key={num}
+                        onClick={() => handleNumPadClick(num.toString())}
+                        className="h-16 w-full rounded-2xl bg-slate-50 hover:bg-slate-100 text-2xl font-semibold text-slate-700 shadow-sm border border-slate-200 active:scale-95 transition-all"
+                      >
+                        {num}
+                      </button>
+                    ))}
+                    <div className="flex items-center justify-center"></div>
+                    <button
+                      onClick={() => handleNumPadClick('0')}
+                      className="h-16 w-full rounded-2xl bg-slate-50 hover:bg-slate-100 text-2xl font-semibold text-slate-700 shadow-sm border border-slate-200 active:scale-95 transition-all"
+                    >
+                      0
+                    </button>
+                    <button
+                      onClick={handleBackspace}
+                      className="h-16 w-full rounded-2xl bg-red-50 hover:bg-red-100 text-red-600 shadow-sm border border-red-100 flex items-center justify-center active:scale-95 transition-all"
+                    >
+                      <Delete className="w-6 h-6" />
+                    </button>
+                  </div>
+                </>
+              ) : (
+                /* PASSWORD INPUT FOR ADMIN */
+                <form onSubmit={handlePasswordSubmit} className="space-y-4">
+                  <div className="relative">
+                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                       <Key className="h-5 w-5 text-slate-400" />
+                     </div>
+                     <input
+                       type="password"
+                       autoFocus
+                       className="block w-full pl-10 pr-3 py-4 border border-slate-300 rounded-xl leading-5 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
+                       placeholder="Password"
+                       value={password}
+                       onChange={(e) => {
+                         setPassword(e.target.value);
+                         setError('');
+                       }}
+                     />
+                  </div>
                   <button
-                    key={num}
-                    onClick={() => handleNumPadClick(num.toString())}
-                    className="h-16 w-full rounded-2xl bg-slate-50 hover:bg-slate-100 text-2xl font-semibold text-slate-700 shadow-sm border border-slate-200 active:scale-95 transition-all"
+                    type="submit"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-colors shadow-lg shadow-blue-200 flex items-center justify-center gap-2"
                   >
-                    {num}
+                    Login <ArrowRight className="w-5 h-5" />
                   </button>
-                ))}
-                <div className="flex items-center justify-center">
-                   {/* Empty slot for alignment */}
-                </div>
-                <button
-                  onClick={() => handleNumPadClick('0')}
-                  className="h-16 w-full rounded-2xl bg-slate-50 hover:bg-slate-100 text-2xl font-semibold text-slate-700 shadow-sm border border-slate-200 active:scale-95 transition-all"
-                >
-                  0
-                </button>
-                <button
-                  onClick={handleBackspace}
-                  className="h-16 w-full rounded-2xl bg-red-50 hover:bg-red-100 text-red-600 shadow-sm border border-red-100 flex items-center justify-center active:scale-95 transition-all"
-                >
-                  <Delete className="w-6 h-6" />
-                </button>
-              </div>
+                </form>
+              )}
             </div>
           )}
         </div>
       </div>
       
       <div className="fixed bottom-4 text-slate-400 text-xs text-center w-full">
-        PackTrack Pro v1.3 &bull; Secure Access
+        PackTrack Pro v1.4 &bull; Secure Access
       </div>
     </div>
   );

@@ -28,15 +28,17 @@ export const TrackerView: React.FC<TrackerViewProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const AUTO_TIMEOUT_MS = 60 * 60 * 3600;
+  // Auto-timeout threshold set to 3 hours
+  const AUTO_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
       setCurrentTime(now);
       logs.forEach(l => {
+        // If > 3 hours have passed, force close the log (backend sets duration to 15m)
         if (l.endTime === null && (now - l.startTime > AUTO_TIMEOUT_MS)) {
-           autoTimeoutLog(l.id, l.startTime, AUTO_TIMEOUT_MS);
+           autoTimeoutLog(l.id, l.startTime);
         }
       });
     }, 1000);

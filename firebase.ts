@@ -12,7 +12,8 @@ import {
   where, 
   getDocs, 
   writeBatch,
-  setDoc
+  setDoc,
+  getDoc
 } from "firebase/firestore";
 import { PackageLog, User, ShipmentDetails } from './types';
 
@@ -124,8 +125,6 @@ export const addLogEntry = async (log: Omit<PackageLog, 'id'>) => {
   const logsRef = collection(db, LOGS_COL);
   
   // Attempt to clock out previous active logs for THIS USER
-  // We wrap this in a try/catch because querying by [userId, endTime] requires a composite index.
-  // If the index is missing, we log a warning but PROCEED to add the new log so the user isn't blocked.
   try {
     const q = query(
       logsRef, 
@@ -136,8 +135,20 @@ export const addLogEntry = async (log: Omit<PackageLog, 'id'>) => {
     
     if (!snapshot.empty) {
       const batch = writeBatch(db);
+      const now = Date.now();
+      const MAX_DURATION = 3 * 60 * 60 * 1000; // 3 Hours
+      const FALLBACK_DURATION = 15 * 60 * 1000; // 15 Minutes
+
       snapshot.docs.forEach((docSnap) => {
-        batch.update(docSnap.ref, { endTime: Date.now() });
+        const data = docSnap.data();
+        let endTime = now;
+        
+        // If duration is > 3 hours, assume they forgot to clock out and set it to 15 mins
+        if (data.startTime && (now - data.startTime > MAX_DURATION)) {
+           endTime = data.startTime + FALLBACK_DURATION;
+        }
+
+        batch.update(docSnap.ref, { endTime });
       });
       await batch.commit();
     }
@@ -151,15 +162,38 @@ export const addLogEntry = async (log: Omit<PackageLog, 'id'>) => {
 
 export const clockOutActiveLog = async (logId: string) => {
   const logRef = doc(db, LOGS_COL, logId);
-  await updateDoc(logRef, {
-    endTime: Date.now()
-  });
+  
+  try {
+    const snap = await getDoc(logRef);
+    if (snap.exists()) {
+       const data = snap.data();
+       const now = Date.now();
+       const MAX_DURATION = 3 * 60 * 60 * 1000; // 3 Hours
+       const FALLBACK_DURATION = 15 * 60 * 1000; // 15 Minutes
+       
+       let endTime = now;
+       // If duration is > 3 hours, cap at 15 mins
+       if (data.startTime && (now - data.startTime > MAX_DURATION)) {
+          endTime = data.startTime + FALLBACK_DURATION;
+       }
+       
+       await updateDoc(logRef, { endTime });
+    } else {
+      // Fallback
+      await updateDoc(logRef, { endTime: Date.now() });
+    }
+  } catch (e) {
+    console.warn("Error clocking out:", e);
+    await updateDoc(logRef, { endTime: Date.now() });
+  }
 };
 
-export const autoTimeoutLog = async (logId: string, startTime: number, timeoutDuration: number) => {
+export const autoTimeoutLog = async (logId: string, startTime: number) => {
   const logRef = doc(db, LOGS_COL, logId);
+  const FALLBACK_DURATION = 15 * 60 * 1000; // 15 Minutes
+  
   await updateDoc(logRef, {
-    endTime: startTime + timeoutDuration
+    endTime: startTime + FALLBACK_DURATION
   });
 };
 

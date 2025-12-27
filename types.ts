@@ -2,8 +2,9 @@
 export interface User {
   id: string;
   name: string;
-  role: 'ADMIN' | 'USER';
-  pin: string;
+  role: 'ADMIN' | 'USER' | 'SUPPORT';
+  pin: string; // Used for Packers (USER)
+  password?: string; // Used for ADMIN and SUPPORT
 }
 
 export interface ShipmentDetails {

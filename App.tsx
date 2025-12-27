@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { PackageLog, Tab, User } from './types';
 import { TrackerView } from './components/TrackerView';
@@ -8,7 +9,7 @@ import { LoginView } from './components/LoginView';
 import { OrderDetailsView } from './components/OrderDetailsView';
 import { PackageTrackingView } from './components/PackageTrackingView';
 import { subscribeToLogs, subscribeToUsers, clearAllSystemData } from './firebase'; 
-import { Box, BarChart3, History, LayoutDashboard, Settings, LogOut, X, PanelLeftClose, PanelLeftOpen, Shield, AlertTriangle, Database, Lock, Truck, ShoppingBag } from 'lucide-react';
+import { Box, BarChart3, History, LayoutDashboard, Settings, LogOut, X, PanelLeftClose, PanelLeftOpen, Shield, AlertTriangle, Database, Lock, Truck, ShoppingBag, LifeBuoy } from 'lucide-react';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>(Tab.TRACKER);
@@ -101,6 +102,11 @@ const App: React.FC = () => {
     setLoginTimestamp(undefined);
     setIsSidebarOpen(true); 
   };
+
+  // --- PERMISSION HELPERS ---
+  const isAdmin = currentUser?.role === 'ADMIN';
+  const isSupport = currentUser?.role === 'SUPPORT';
+  const hasAdminPrivileges = isAdmin || isSupport; // Can see everything EXCEPT analytics and config (which is admin only)
 
   if (dbError === 'permission-denied') {
     return (
@@ -215,12 +221,14 @@ service cloud.firestore {
 
         <div className="p-4 border-b border-slate-800 bg-slate-800/50">
            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shadow-sm ${currentUser?.role === 'ADMIN' ? 'bg-purple-600 text-white' : 'bg-blue-600 text-white'}`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shadow-sm 
+                ${isAdmin ? 'bg-purple-600 text-white' : isSupport ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white'}`}>
                 {currentUser?.name.charAt(0).toUpperCase()}
               </div>
               <div className="overflow-hidden">
                 <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold flex items-center gap-1">
-                   {currentUser?.role === 'ADMIN' && <Shield className="w-3 h-3" />}
+                   {isAdmin && <Shield className="w-3 h-3" />}
+                   {isSupport && <LifeBuoy className="w-3 h-3" />}
                    {currentUser?.role}
                 </p>
                 <p className="text-sm font-bold text-white truncate">
@@ -241,7 +249,8 @@ service cloud.firestore {
             <span className="font-medium">Tracker</span>
           </button>
 
-          {currentUser?.role === 'ADMIN' && (
+          {/* ADMIN ONLY */}
+          {isAdmin && (
             <>
               <button
                 onClick={() => handleNavClick(Tab.ANALYTICS)}
@@ -252,7 +261,12 @@ service cloud.firestore {
                 <BarChart3 className="w-5 h-5" />
                 <span className="font-medium">Analytics</span>
               </button>
+            </>
+          )}
 
+          {/* ADMIN & SUPPORT */}
+          {hasAdminPrivileges && (
+            <>
               <button
                 onClick={() => handleNavClick(Tab.HISTORY)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
@@ -282,22 +296,25 @@ service cloud.firestore {
                 <Truck className="w-5 h-5" />
                 <span className="font-medium">Tracking</span>
               </button>
-
-              <button
-                onClick={() => handleNavClick(Tab.CONFIGURATION)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
-                  activeTab === Tab.CONFIGURATION ? 'bg-blue-600 text-white shadow-lg translate-x-1' : 'hover:bg-slate-800 hover:translate-x-1'
-                }`}
-              >
-                <Settings className="w-5 h-5" />
-                <span className="font-medium">Configuration</span>
-              </button>
             </>
+          )}
+
+          {/* ADMIN ONLY - CONFIGURATION */}
+          {isAdmin && (
+            <button
+              onClick={() => handleNavClick(Tab.CONFIGURATION)}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
+                activeTab === Tab.CONFIGURATION ? 'bg-blue-600 text-white shadow-lg translate-x-1' : 'hover:bg-slate-800 hover:translate-x-1'
+              }`}
+            >
+              <Settings className="w-5 h-5" />
+              <span className="font-medium">Configuration</span>
+            </button>
           )}
         </nav>
 
         <div className="p-6 border-t border-slate-800">
-           {currentUser?.role === 'ADMIN' && (
+           {isAdmin && (
              <button 
                type="button"
                onClick={clearData} 
@@ -360,23 +377,23 @@ service cloud.firestore {
               loginTimestamp={loginTimestamp}
             />
           )}
-          {activeTab === Tab.ANALYTICS && currentUser?.role === 'ADMIN' && (
+          {activeTab === Tab.ANALYTICS && isAdmin && (
             <AnalyticsView logs={logs} users={users} />
           )}
-          {activeTab === Tab.HISTORY && currentUser?.role === 'ADMIN' && (
+          {activeTab === Tab.HISTORY && hasAdminPrivileges && (
             <HistoryView 
               logs={logs} 
               users={users} 
               requestConfirm={requestConfirm} 
             />
           )}
-          {activeTab === Tab.ORDERS && currentUser?.role === 'ADMIN' && (
+          {activeTab === Tab.ORDERS && hasAdminPrivileges && (
              <OrderDetailsView />
           )}
-          {activeTab === Tab.TRACKING && currentUser?.role === 'ADMIN' && (
+          {activeTab === Tab.TRACKING && hasAdminPrivileges && (
              <PackageTrackingView />
           )}
-          {activeTab === Tab.CONFIGURATION && currentUser?.role === 'ADMIN' && (
+          {activeTab === Tab.CONFIGURATION && isAdmin && (
             <ConfigurationView 
               users={users} 
               currentUser={currentUser} 
@@ -386,10 +403,22 @@ service cloud.firestore {
             />
           )}
           
-          {(activeTab !== Tab.TRACKER && currentUser?.role !== 'ADMIN') && (
+          {(activeTab !== Tab.TRACKER && !hasAdminPrivileges && activeTab !== Tab.ANALYTICS) && (
             <div className="flex flex-col items-center justify-center h-full text-slate-400">
               <Shield className="w-16 h-16 mb-4 opacity-20" />
               <p>Access Restricted</p>
+            </div>
+          )}
+           {(activeTab === Tab.ANALYTICS && !isAdmin) && (
+            <div className="flex flex-col items-center justify-center h-full text-slate-400">
+              <BarChart3 className="w-16 h-16 mb-4 opacity-20" />
+              <p>Analytics are restricted to Administrators only.</p>
+            </div>
+          )}
+          {(activeTab === Tab.CONFIGURATION && !isAdmin) && (
+            <div className="flex flex-col items-center justify-center h-full text-slate-400">
+              <Settings className="w-16 h-16 mb-4 opacity-20" />
+              <p>System Configuration is restricted to Administrators only.</p>
             </div>
           )}
         </div>

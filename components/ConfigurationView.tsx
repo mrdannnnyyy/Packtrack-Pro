@@ -1,7 +1,8 @@
+
 import React, { useState } from 'react';
 import { User, Tab } from '../types';
 import { addUser, updateUser, deleteUser } from '../firebase';
-import { UserCircle, Trash2, Plus, ShieldCheck, UserX, Shield, Users, Edit2, X, CloudCheck } from 'lucide-react';
+import { UserCircle, Trash2, Plus, ShieldCheck, UserX, Shield, Users, Edit2, X, CloudCheck, LifeBuoy, Key } from 'lucide-react';
 
 interface ConfigurationViewProps {
   users: User[];
@@ -18,20 +19,33 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
   requestConfirm
 }) => {
   const [newUserName, setNewUserName] = useState('');
-  const [newUserPin, setNewUserPin] = useState('');
-  const [newUserRole, setNewUserRole] = useState<'ADMIN' | 'USER'>('USER');
+  const [newUserAuth, setNewUserAuth] = useState(''); // Stores PIN or Password
+  const [newUserRole, setNewUserRole] = useState<'ADMIN' | 'USER' | 'SUPPORT'>('USER');
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
 
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUserName.trim() || newUserPin.length !== 4) return;
+    if (!newUserName.trim() || !newUserAuth.trim()) return;
+
+    // Determine fields based on role
+    // ADMIN uses password. USER and SUPPORT use PIN.
+    const isPinUser = newUserRole === 'USER' || newUserRole === 'SUPPORT';
+    const pinVal = isPinUser ? newUserAuth : '';
+    // FIX: Firestore does not support 'undefined'. Use empty string instead.
+    const passVal = !isPinUser ? newUserAuth : '';
+
+    if (isPinUser && pinVal.length !== 4) {
+      alert("PIN must be exactly 4 digits.");
+      return;
+    }
 
     if (editingUserId) {
       // UPDATE EXISTING USER
       await updateUser(editingUserId, {
         name: newUserName.trim(),
         role: newUserRole,
-        pin: newUserPin
+        pin: pinVal,
+        password: passVal
       });
       setEditingUserId(null);
     } else {
@@ -39,7 +53,8 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
       await addUser({
         name: newUserName.trim(),
         role: newUserRole,
-        pin: newUserPin
+        pin: pinVal,
+        password: passVal
       });
     }
     
@@ -49,14 +64,19 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
 
   const handleEditClick = (user: User) => {
     setNewUserName(user.name);
-    setNewUserPin(user.pin);
+    // Load existing PIN or Password into the auth field
+    if (user.role === 'USER' || user.role === 'SUPPORT') {
+      setNewUserAuth(user.pin);
+    } else {
+      setNewUserAuth(user.password || ''); 
+    }
     setNewUserRole(user.role);
     setEditingUserId(user.id);
   };
 
   const resetForm = () => {
     setNewUserName('');
-    setNewUserPin('');
+    setNewUserAuth('');
     setNewUserRole('USER');
     setEditingUserId(null);
   };
@@ -79,6 +99,8 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
       }
     });
   };
+
+  const isPinBasedRole = newUserRole === 'USER' || newUserRole === 'SUPPORT';
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto pb-10">
@@ -123,43 +145,69 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
               
               <div>
                  <label className="block text-sm font-medium text-slate-700 mb-1">Role</label>
-                 <div className="grid grid-cols-2 gap-2">
+                 <div className="grid grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => setNewUserRole('USER')}
-                      className={`py-2 px-3 rounded-lg border text-sm font-medium flex items-center justify-center gap-2 ${newUserRole === 'USER' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'}`}
+                      className={`py-2 px-1 rounded-lg border text-xs font-medium flex flex-col items-center justify-center gap-1 ${newUserRole === 'USER' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'}`}
                     >
                       <Users className="w-4 h-4" /> Packer
                     </button>
                     <button
                       type="button"
+                      onClick={() => setNewUserRole('SUPPORT')}
+                      className={`py-2 px-1 rounded-lg border text-xs font-medium flex flex-col items-center justify-center gap-1 ${newUserRole === 'SUPPORT' ? 'bg-emerald-50 border-emerald-500 text-emerald-700' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      <LifeBuoy className="w-4 h-4" /> Support
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setNewUserRole('ADMIN')}
-                      className={`py-2 px-3 rounded-lg border text-sm font-medium flex items-center justify-center gap-2 ${newUserRole === 'ADMIN' ? 'bg-purple-50 border-purple-500 text-purple-700' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'}`}
+                      className={`py-2 px-1 rounded-lg border text-xs font-medium flex flex-col items-center justify-center gap-1 ${newUserRole === 'ADMIN' ? 'bg-purple-50 border-purple-500 text-purple-700' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'}`}
                     >
                       <Shield className="w-4 h-4" /> Admin
                     </button>
                  </div>
-                 <p className="text-xs text-slate-400 mt-1">
-                   {newUserRole === 'USER' ? 'Restricted to Tracker view only.' : 'Full access to Analytics and Config.'}
+                 <p className="text-xs text-slate-400 mt-2">
+                   {newUserRole === 'USER' && 'Restricted to Tracker view only. Uses a 4-Digit PIN.'}
+                   {newUserRole === 'SUPPORT' && 'Can view Orders, Tracking & History. Uses a 4-Digit PIN.'}
+                   {newUserRole === 'ADMIN' && 'Full system access including Analytics & Config. Uses a Password.'}
                  </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">4-Digit PIN</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={4}
-                  placeholder="0000"
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono tracking-widest"
-                  value={newUserPin}
-                  onChange={(e) => setNewUserPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                />
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  {isPinBasedRole ? '4-Digit PIN' : 'Password'}
+                </label>
+                <div className="relative">
+                  {isPinBasedRole ? (
+                     <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={4}
+                      placeholder="0000"
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono tracking-widest"
+                      value={newUserAuth}
+                      onChange={(e) => setNewUserAuth(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    />
+                  ) : (
+                    <div className="relative">
+                       <input
+                        type="text"
+                        placeholder="Enter secure password"
+                        className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={newUserAuth}
+                        onChange={(e) => setNewUserAuth(e.target.value)}
+                      />
+                      <Key className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                    </div>
+                  )}
+                </div>
               </div>
 
               <button 
                 type="submit"
-                disabled={!newUserName.trim() || newUserPin.length !== 4}
+                disabled={!newUserName.trim() || !newUserAuth}
                 className={`w-full text-white py-2.5 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors mt-2 
                   ${editingUserId 
                     ? 'bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300' 
@@ -190,7 +238,7 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">User</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Role</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">PIN</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Auth</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
@@ -208,7 +256,7 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-3">
                           <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold 
-                            ${user.role === 'ADMIN' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
+                            ${user.role === 'ADMIN' ? 'bg-purple-100 text-purple-600' : user.role === 'SUPPORT' ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'}`}>
                             {user.name.charAt(0).toUpperCase()}
                           </div>
                           <span className="font-medium text-slate-700">{user.name}</span>
@@ -218,18 +266,24 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {user.role === 'ADMIN' ? (
+                        {user.role === 'ADMIN' && (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200">
                             <ShieldCheck className="w-3 h-3" /> Admin
                           </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                        )}
+                        {user.role === 'SUPPORT' && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <LifeBuoy className="w-3 h-3" /> Support
+                          </span>
+                        )}
+                        {user.role === 'USER' && (
+                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
                             <Users className="w-3 h-3" /> Packer
                           </span>
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap font-mono text-sm text-slate-500">
-                        {user.pin}
+                        {user.role === 'ADMIN' ? 'Password' : `PIN: ${user.pin}`}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <button 

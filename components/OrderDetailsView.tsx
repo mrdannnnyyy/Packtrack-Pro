@@ -18,13 +18,26 @@ export const OrderDetailsView: React.FC = () => {
   const [filterText, setFilterText] = useState('');
 
   // Column Resizing State
-  const [colWidths, setColWidths] = useState({
-    order: 150,
-    date: 120,
-    customer: 250,
-    items: 300,
-    tracking: 180
+  const [colWidths, setColWidths] = useState(() => {
+    try {
+      const saved = localStorage.getItem('packtrack_order_cols');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error("Failed to load saved column widths", e);
+    }
+    return {
+      order: 150,
+      date: 120,
+      customer: 250,
+      items: 300,
+      tracking: 180
+    };
   });
+
+  // Persist column widths when they change
+  useEffect(() => {
+    localStorage.setItem('packtrack_order_cols', JSON.stringify(colWidths));
+  }, [colWidths]);
 
   const resizeRef = useRef<{ col: keyof typeof colWidths, startX: number, startWidth: number } | null>(null);
 
