@@ -35,6 +35,49 @@ const SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30 Minutes
 
 // --- HELPER FUNCTIONS ---
 
+async function fetchLiveOrders() {
+  // In a real scenario, this would call the ShipStation API:
+  // const response = await axios.get('https://ssapi.shipstation.com/shipments', { auth: { ... } });
+  // return response.data.shipments;
+  
+  // For this environment, we simulate the raw response from ShipStation
+  const now = Date.now();
+  return Array.from({ length: 5 }).map((_, i) => ({
+    orderId: `SS-${now}-${i}`,
+    orderNumber: `ORD-${Math.floor(10000 + Math.random() * 90000)}`,
+    customerName: `Customer ${Math.floor(Math.random() * 1000)}`,
+    customerEmail: `user${i}@example.com`,
+    items: `Item ${String.fromCharCode(65+i)} x${i+1}`,
+    shipDate: new Date().toISOString().split('T')[0],
+    trackingNumber: `1Z${Math.random().toString(36).substring(7).toUpperCase()}`,
+    carrierCode: 'ups',
+    orderStatus: 'shipped',
+    // These are the raw cost fields from ShipStation
+    shipmentCost: Math.random() * 12 + 4,
+    insuranceCost: Math.random() > 0.7 ? 2.50 : 0
+  }));
+}
+
+function cleanData(s, now) {
+  return {
+    orderId: s.orderId,
+    orderNumber: s.orderNumber,
+    customerName: s.customerName,
+    customerEmail: s.customerEmail,
+    items: s.items,
+    shipDate: s.shipDate,
+    trackingNumber: s.trackingNumber,
+    carrierCode: s.carrierCode,
+    status: s.orderStatus,
+    lastUpdated: now,
+    upsStatus: 'Pending',
+    delivered: false,
+    flagged: false,
+    // FIX: Summing shipmentCost and insuranceCost for accurate total label cost
+    labelCost: (s.shipmentCost || 0) + (s.insuranceCost || 0)
+  };
+}
+
 async function getPaginatedData(collectionName, page, limit, filterFn = null) {
   const snapshot = await db.collection(collectionName).orderBy('lastUpdated', 'desc').get();
   let data = snapshot.docs.map(doc => doc.data());
@@ -76,7 +119,7 @@ app.get('/orders', async (req, res) => {
   }
 });
 
-// NEW: Persistent Flagging Endpoint
+// Persistent Flagging Endpoint
 app.post('/flag', async (req, res) => {
   const { trackingNumber, orderNumber, flagged } = req.body;
   if (!orderNumber) return res.status(400).send("Missing orderNumber");
@@ -111,21 +154,9 @@ app.post('/sync/orders', async (req, res) => {
       }
     }
 
-    const mockOrders = Array.from({ length: 5 }).map((_, i) => ({
-      orderId: `SS-${now}-${i}`,
-      orderNumber: `ORD-${Math.floor(10000 + Math.random() * 90000)}`,
-      customerName: `Customer ${Math.floor(Math.random() * 1000)}`,
-      customerEmail: `user${i}@example.com`,
-      items: `Item ${String.fromCharCode(65+i)} x${i+1}`,
-      shipDate: new Date().toISOString().split('T')[0],
-      trackingNumber: `1Z${Math.random().toString(36).substring(7).toUpperCase()}`,
-      carrierCode: 'ups',
-      status: 'shipped',
-      lastUpdated: now,
-      upsStatus: 'Pending',
-      delivered: false,
-      flagged: false
-    }));
+    // Call our refined helper functions
+    const rawOrders = await fetchLiveOrders();
+    const mockOrders = rawOrders.map(s => cleanData(s, now));
 
     const batch = db.batch();
     mockOrders.forEach(order => {

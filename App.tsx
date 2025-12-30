@@ -30,7 +30,6 @@ const App: React.FC = () => {
   const [remoteTotal, setRemoteTotal] = useState(0);
   const [lastSync, setLastSync] = useState(0);
   const [remoteError, setRemoteError] = useState<string | null>(null);
-  // Default status for Tracking tab is "Active"
   const [remoteStatus, setRemoteStatus] = useState<string | null>(null);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(typeof window !== 'undefined' ? window.innerWidth >= 768 : true);
@@ -45,24 +44,14 @@ const App: React.FC = () => {
     setRemoteError(null);
     try {
       let res;
-      // Determine effective status: passed param takes precedence over state
+      // Use the passed status if available, otherwise fall back to state
+      // This ensures manual refreshes or effect-driven fetches use the intended status
       const effectiveStatus = status !== undefined ? status : remoteStatus;
       
-      // Map Tab to specific endpoint and use provided status filters
       if (activeTab === Tab.TRACKING) {
-        // Fetch from /tracking with optional status=Active|Delivered|Issues
-        res = await fetchTrackingList(
-          pageNum, 
-          effectiveStatus === 'Delivered' ? 50 : 25, 
-          effectiveStatus || undefined
-        );
+        res = await fetchTrackingList(pageNum, 25, effectiveStatus || undefined);
       } else {
-        // Fetch from /orders with optional status=Active|Delivered|Issues
-        res = await fetchOrders(
-          pageNum, 
-          effectiveStatus === 'Delivered' ? 50 : 25, 
-          effectiveStatus || undefined
-        );
+        res = await fetchOrders(pageNum, 25, effectiveStatus || undefined);
       }
       
       setRemoteData(res.data || []);
@@ -80,27 +69,29 @@ const App: React.FC = () => {
   // Handle Main Sidebar Tab Changes
   useEffect(() => {
     if (activeTab === Tab.ORDERS || activeTab === Tab.TRACKING) {
-      setRemotePage(1);
-      // Reset status to "Active" by default for Tracking, null for Orders (All)
+      // Clear data to prevent flashing old tab's data
+      setRemoteData([]);
       const defaultStatus = activeTab === Tab.TRACKING ? 'Active' : null;
       setRemoteStatus(defaultStatus);
-      fetchRemoteData(1, defaultStatus);
+      setRemotePage(1);
+      // NOTE: We do NOT fetch here manually anymore. 
+      // The state updates above will trigger the 'remotePage/remoteStatus' effect below.
     }
   }, [activeTab]);
 
-  // Handle Sub-Status Changes (e.g. from PackageTrackingView tabs)
+  // Handle Page and Status Changes automatically
+  // This is the SINGLE source of truth for triggering fetches when view parameters change
+  useEffect(() => {
+    if (activeTab === Tab.ORDERS || activeTab === Tab.TRACKING) {
+      fetchRemoteData(remotePage, remoteStatus);
+    }
+  }, [remotePage, remoteStatus, fetchRemoteData]); 
+
   const handleStatusChange = (status: string | null) => {
     setRemoteStatus(status);
     setRemotePage(1);
-    fetchRemoteData(1, status);
+    // Removed manual fetch call to avoid race condition with the useEffect above
   };
-
-  // Handle Page Changes
-  useEffect(() => {
-    if (remotePage > 1) {
-       fetchRemoteData(remotePage, remoteStatus);
-    }
-  }, [remotePage]);
 
   // APP INITIALIZATION: Firestore Subscriptions
   useEffect(() => {

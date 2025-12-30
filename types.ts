@@ -7,6 +7,18 @@ export interface User {
   password?: string; // Used for ADMIN and SUPPORT
 }
 
+export interface BoxType {
+  id: string;
+  name: string;
+  cost: number;
+}
+
+export interface CostSettings {
+  hourlyRate: number;
+  materialCost: number;
+  boxes: BoxType[];
+}
+
 export interface ShipmentDetails {
   status: string;
   carrier: string; // 'UPS'

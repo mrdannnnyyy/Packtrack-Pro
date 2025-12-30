@@ -14,7 +14,7 @@ interface PackageTrackingViewProps {
   loading: boolean;
   error: boolean;
   page: number;
-  setPage: (page: number) => void;
+  setPage: (page: number | ((prev: number) => number)) => void;
   totalPages: number;
   onRefresh: () => void;
   activeStatusFilter: string | null;
@@ -99,7 +99,7 @@ export const PackageTrackingView: React.FC<PackageTrackingViewProps> = ({
   const [isFlagged, setIsFlagged] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
 
-  // Column Resizing State - Updated with the requested minimums
+  // Column Resizing State
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const saved = localStorage.getItem('packtrack_col_widths');
     if (saved) {
@@ -250,6 +250,19 @@ export const PackageTrackingView: React.FC<PackageTrackingViewProps> = ({
     setVisibleColumns(prev => 
       prev.includes(colId) ? prev.filter(c => c !== colId) : [...prev, colId]
     );
+  };
+
+  // --- PAGINATION HANDLERS ---
+  const handlePrevious = () => {
+    if (page > 1) {
+      setPage(prev => Math.max(prev - 1, 1));
+    }
+  };
+
+  const handleNext = () => {
+    if (page < totalPages) {
+      setPage(prev => Math.min(prev + 1, totalPages));
+    }
   };
 
   return (
@@ -496,10 +509,26 @@ export const PackageTrackingView: React.FC<PackageTrackingViewProps> = ({
         
         {/* Pagination Toolbar */}
         <div className="bg-slate-50 px-6 py-3 border-t border-slate-200 flex justify-between items-center text-sm flex-shrink-0">
-            <span className="text-slate-500">Page <span className="font-bold text-slate-700">{page}</span> of <span className="font-bold text-slate-700">{totalPages}</span></span>
+            <span className="text-slate-500">
+              Page <span className="font-bold text-slate-700">{page}</span> of <span className="font-bold text-slate-700">{totalPages}</span>
+            </span>
             <div className="flex gap-2">
-                <button disabled={page===1} onClick={()=>setPage(page-1)} className="p-1.5 border border-slate-300 rounded-md bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-40 transition-colors shadow-sm"><ChevronLeft className="w-4 h-4"/></button>
-                <button disabled={page===totalPages} onClick={()=>setPage(page+1)} className="p-1.5 border border-slate-300 rounded-md bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-40 transition-colors shadow-sm"><ChevronRight className="w-4 h-4"/></button>
+                <button 
+                  disabled={page <= 1 || loading} 
+                  onClick={handlePrevious} 
+                  className="p-1.5 border border-slate-300 rounded-md bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
+                  title="Previous Page"
+                >
+                  <ChevronLeft className="w-4 h-4"/>
+                </button>
+                <button 
+                  disabled={page >= totalPages || loading} 
+                  onClick={handleNext} 
+                  className="p-1.5 border border-slate-300 rounded-md bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
+                  title="Next Page"
+                >
+                  <ChevronRight className="w-4 h-4"/>
+                </button>
             </div>
         </div>
       </div>
