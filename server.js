@@ -78,16 +78,71 @@ function cleanData(s, now) {
   };
 }
 
-async function getPaginatedData(collectionName, page, limit, filterFn = null) {
+async function getPaginatedData(collectionName, page, limit, filterFn = null, sortFn = null) {
+  // 1. Fetch all data (In-memory approach for this scale)
+  // We default to lastUpdated desc, but allow re-sorting later
   const snapshot = await db.collection(collectionName).orderBy('lastUpdated', 'desc').get();
   let data = snapshot.docs.map(doc => doc.data());
+  
+  // 2. Filter
   if (filterFn) {
     data = data.filter(filterFn);
   }
+
+  // 3. Custom Sort (e.g., Prioritize Flags)
+  if (sortFn) {
+    data.sort(sortFn);
+  }
+
+  // 4. Paginate
   const total = data.length;
   const totalPages = Math.ceil(total / limit);
   const startIndex = (page - 1) * limit;
   const paginatedData = data.slice(startIndex, startIndex + limit);
+  
+  return { data: paginatedData, total, page, totalPages };
+}
+
+async function getIssuesData(collectionName, page, limit) {
+  // STRATEGY: Merged Query for Issues
+  // 1. Fetch ALL Flagged items (Global) - Ensures we find old flagged items
+  const flaggedSnap = await db.collection(collectionName).where('flagged', '==', true).get();
+  const flaggedDocs = flaggedSnap.docs.map(d => d.data());
+
+  // 2. Fetch Recent items (to catch system issues that aren't flagged yet)
+  // We fetch a larger pool (e.g. 200) to find recent exceptions in the latest data
+  const recentSnap = await db.collection(collectionName).orderBy('lastUpdated', 'desc').limit(200).get();
+  const recentDocs = recentSnap.docs.map(d => d.data());
+
+  // 3. Filter Recent items for "System Issues" (substring match)
+  const systemIssues = recentDocs.filter(item => {
+       const status = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
+       return status.includes('exception') || status.includes('error') || status.includes('issue') || status.includes('fail');
+  });
+
+  // 4. Merge & Deduplicate
+  const merged = new Map();
+  // Add flagged items (High Priority)
+  flaggedDocs.forEach(d => merged.set(d.orderNumber, d));
+  // Add system issues (Low Priority)
+  systemIssues.forEach(d => {
+      if (!merged.has(d.orderNumber)) merged.set(d.orderNumber, d);
+  });
+
+  let data = Array.from(merged.values());
+
+  // 5. Sort: Flagged First, then Date
+  data.sort((a, b) => {
+      if (!!a.flagged !== !!b.flagged) return a.flagged ? -1 : 1;
+      return (b.lastUpdated || 0) - (a.lastUpdated || 0);
+  });
+
+  // 6. Paginate
+  const total = data.length;
+  const totalPages = Math.ceil(total / limit);
+  const startIndex = (page - 1) * limit;
+  const paginatedData = data.slice(startIndex, startIndex + limit);
+
   return { data: paginatedData, total, page, totalPages };
 }
 
@@ -98,22 +153,52 @@ app.get('/orders', async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 25;
     const statusFilter = req.query.status;
-    
-    const filter = (item) => {
-      // If filtering for issues/exception, include manually flagged items
-      if (statusFilter === 'Issues' || statusFilter === 'Exception') {
-        if (item.flagged === true) return true;
-      }
-      
-      if (!statusFilter) return true;
-      const status = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
-      return status.includes(statusFilter.toLowerCase());
-    };
+    const isIssuesMode = statusFilter === 'Issues' || statusFilter === 'Exception';
 
-    const result = await getPaginatedData(COLLECTION_NAME, page, limit, filter);
+    let result;
+    if (isIssuesMode) {
+        result = await getIssuesData(COLLECTION_NAME, page, limit);
+    } else {
+        const filter = (item) => {
+            if (!statusFilter) return true;
+            const status = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
+            return status.includes(statusFilter.toLowerCase());
+        };
+        // Standard in-memory pagination for other views
+        result = await getPaginatedData(COLLECTION_NAME, page, limit, filter);
+    }
+    
     const meta = await db.collection(META_COLLECTION).doc('shipstation').get();
     const lastSync = meta.exists ? meta.data().lastSync : 0;
     res.json({ ...result, lastSync });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/tracking', async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 25;
+    const statusFilter = req.query.status;
+    const isIssuesMode = statusFilter === 'Issues' || statusFilter === 'Exception';
+    
+    let result;
+    if (isIssuesMode) {
+        result = await getIssuesData(COLLECTION_NAME, page, limit);
+    } else {
+        const filter = (item) => {
+            const validTracking = item.trackingNumber && item.trackingNumber !== 'No Tracking';
+            if (!validTracking) return false;
+            
+            if (!statusFilter) return true;
+            const status = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
+            return status.includes(statusFilter.toLowerCase());
+        };
+        result = await getPaginatedData(COLLECTION_NAME, page, limit, filter);
+    }
+    
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -167,33 +252,6 @@ app.post('/sync/orders', async (req, res) => {
     batch.set(metaRef, { lastSync: now }, { merge: true });
     await batch.commit();
     res.json({ success: true, count: mockOrders.length, message: "Successfully synced with ShipStation" });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/tracking', async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 25;
-    const statusFilter = req.query.status;
-    
-    const filter = (item) => {
-      const validTracking = item.trackingNumber && item.trackingNumber !== 'No Tracking';
-      if (!validTracking) return false;
-
-      // If filtering for issues/exception, include manually flagged items
-      if (statusFilter === 'Issues' || statusFilter === 'Exception') {
-        if (item.flagged === true) return true;
-      }
-
-      if (!statusFilter) return true;
-      const status = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
-      return status.includes(statusFilter.toLowerCase());
-    };
-
-    const result = await getPaginatedData(COLLECTION_NAME, page, limit, filter);
-    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
