@@ -36,11 +36,6 @@ const SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30 Minutes
 // --- HELPER FUNCTIONS ---
 
 async function fetchLiveOrders() {
-  // In a real scenario, this would call the ShipStation API:
-  // const response = await axios.get('https://ssapi.shipstation.com/shipments', { auth: { ... } });
-  // return response.data.shipments;
-  
-  // For this environment, we simulate the raw response from ShipStation
   const now = Date.now();
   return Array.from({ length: 5 }).map((_, i) => ({
     orderId: `SS-${now}-${i}`,
@@ -52,7 +47,6 @@ async function fetchLiveOrders() {
     trackingNumber: `1Z${Math.random().toString(36).substring(7).toUpperCase()}`,
     carrierCode: 'ups',
     orderStatus: 'shipped',
-    // These are the raw cost fields from ShipStation
     shipmentCost: Math.random() * 12 + 4,
     insuranceCost: Math.random() > 0.7 ? 2.50 : 0
   }));
@@ -73,28 +67,22 @@ function cleanData(s, now) {
     upsStatus: 'Pending',
     delivered: false,
     flagged: false,
-    // FIX: Summing shipmentCost and insuranceCost for accurate total label cost
     labelCost: (s.shipmentCost || 0) + (s.insuranceCost || 0)
   };
 }
 
-async function getPaginatedData(collectionName, page, limit, filterFn = null, sortFn = null) {
-  // 1. Fetch all data (In-memory approach for this scale)
-  // We default to lastUpdated desc, but allow re-sorting later
+// --- CORE LOGIC: STANDARD PAGINATION ---
+async function getPaginatedData(collectionName, page, limit, filterFn = null) {
+  // Standard logic: Fetch all, filter, then slice
+  // Note: For large datasets, this should eventually use Firestore cursors, 
+  // but for this implementation we keep the existing pattern for consistency.
   const snapshot = await db.collection(collectionName).orderBy('lastUpdated', 'desc').get();
   let data = snapshot.docs.map(doc => doc.data());
   
-  // 2. Filter
   if (filterFn) {
     data = data.filter(filterFn);
   }
 
-  // 3. Custom Sort (e.g., Prioritize Flags)
-  if (sortFn) {
-    data.sort(sortFn);
-  }
-
-  // 4. Paginate
   const total = data.length;
   const totalPages = Math.ceil(total / limit);
   const startIndex = (page - 1) * limit;
@@ -103,74 +91,107 @@ async function getPaginatedData(collectionName, page, limit, filterFn = null, so
   return { data: paginatedData, total, page, totalPages };
 }
 
-async function getIssuesData(collectionName, page, limit) {
-  // STRATEGY: Merged Query for Issues
-  // 1. Fetch ALL Flagged items (Global) - Ensures we find old flagged items
-  const flaggedSnap = await db.collection(collectionName).where('flagged', '==', true).get();
-  const flaggedDocs = flaggedSnap.docs.map(d => d.data());
+// --- CORE LOGIC: ISSUES VIEW (NO PAGINATION) ---
+async function handleIssuesRequest(res) {
+  try {
+    console.log(">>> ISSUES MODE: Executing Strict 'View All' Logic");
 
-  // 2. Fetch Recent items (to catch system issues that aren't flagged yet)
-  // We fetch a larger pool (e.g. 200) to find recent exceptions in the latest data
-  const recentSnap = await db.collection(collectionName).orderBy('lastUpdated', 'desc').limit(200).get();
-  const recentDocs = recentSnap.docs.map(d => d.data());
+    // 1. GLOBAL FETCH: ALL Flagged items (No limit)
+    // We check both boolean true and string "true" to be robust
+    const flagBoolSnap = await db.collection(COLLECTION_NAME).where('flagged', '==', true).get();
+    const flagStrSnap = await db.collection(COLLECTION_NAME).where('flagged', '==', 'true').get();
+    
+    const flaggedDocs = [
+      ...flagBoolSnap.docs.map(d => d.data()),
+      ...flagStrSnap.docs.map(d => d.data())
+    ];
 
-  // 3. Filter Recent items for "System Issues" (substring match)
-  const systemIssues = recentDocs.filter(item => {
-       const status = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
-       return status.includes('exception') || status.includes('error') || status.includes('issue') || status.includes('fail');
-  });
+    // 2. RECENT FETCH: Last 100 System Errors
+    const recentSnap = await db.collection(COLLECTION_NAME)
+      .orderBy('shipDate', 'desc')
+      .limit(100)
+      .get();
+      
+    const recentCandidates = recentSnap.docs.map(d => d.data());
+    
+    // Filter strictly for error-like statuses
+    const errorDocs = recentCandidates.filter(item => {
+      const s = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
+      return s.includes('exception') || 
+             s.includes('error') || 
+             s.includes('issue') || 
+             s.includes('fail') || 
+             s.includes('void') ||
+             s.includes('return');
+    });
 
-  // 4. Merge & Deduplicate
-  const merged = new Map();
-  // Add flagged items (High Priority)
-  flaggedDocs.forEach(d => merged.set(d.orderNumber, d));
-  // Add system issues (Low Priority)
-  systemIssues.forEach(d => {
-      if (!merged.has(d.orderNumber)) merged.set(d.orderNumber, d);
-  });
+    // 3. MERGE (Deduplicate by orderNumber)
+    const combinedMap = new Map();
+    
+    // Add flags first (Priority)
+    flaggedDocs.forEach(d => combinedMap.set(d.orderNumber, d));
+    
+    // Add errors if not already present
+    errorDocs.forEach(d => {
+      if (!combinedMap.has(d.orderNumber)) {
+        combinedMap.set(d.orderNumber, d);
+      }
+    });
 
-  let data = Array.from(merged.values());
+    const mergedList = Array.from(combinedMap.values());
 
-  // 5. Sort: Flagged First, then Date
-  data.sort((a, b) => {
-      if (!!a.flagged !== !!b.flagged) return a.flagged ? -1 : 1;
-      return (b.lastUpdated || 0) - (a.lastUpdated || 0);
-  });
+    // 4. SORT (Flags strictly at top)
+    mergedList.sort((a, b) => {
+      const aFlag = (a.flagged === true || a.flagged === 'true');
+      const bFlag = (b.flagged === true || b.flagged === 'true');
 
-  // 6. Paginate
-  const total = data.length;
-  const totalPages = Math.ceil(total / limit);
-  const startIndex = (page - 1) * limit;
-  const paginatedData = data.slice(startIndex, startIndex + limit);
+      if (aFlag && !bFlag) return -1; // a comes first
+      if (!aFlag && bFlag) return 1;  // b comes first
 
-  return { data: paginatedData, total, page, totalPages };
+      // If both flagged or both not flagged, sort by Date Descending
+      const dateA = new Date(a.shipDate || 0).getTime();
+      const dateB = new Date(b.shipDate || 0).getTime();
+      return dateB - dateA;
+    });
+
+    // 5. RESPONSE (Force Page 1 of 1)
+    res.json({
+      data: mergedList,
+      total: mergedList.length,
+      totalPages: 1, // Forces frontend to disable "Next Page"
+      page: 1        // Forces frontend to show "Page 1"
+    });
+
+  } catch (error) {
+    console.error("Issues Logic Error:", error);
+    res.status(500).json({ error: error.message });
+  }
 }
 
 // --- API ROUTES ---
 
 app.get('/orders', async (req, res) => {
   try {
+    // STRICT INTERCEPTION FOR ISSUES
+    if (req.query.status === 'Issues') {
+      return await handleIssuesRequest(res);
+    }
+
+    // Standard Logic for other statuses
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 25;
-    const statusFilter = req.query.status;
-    const isIssuesMode = statusFilter === 'Issues' || statusFilter === 'Exception';
-
-    let result;
-    if (isIssuesMode) {
-        result = await getIssuesData(COLLECTION_NAME, page, limit);
-    } else {
-        const filter = (item) => {
-            if (!statusFilter) return true;
-            const status = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
-            return status.includes(statusFilter.toLowerCase());
-        };
-        // Standard in-memory pagination for other views
-        result = await getPaginatedData(COLLECTION_NAME, page, limit, filter);
-    }
+    const filter = (item) => {
+      if (!req.query.status) return true;
+      const status = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
+      return status.includes(req.query.status.toLowerCase());
+    };
     
+    const result = await getPaginatedData(COLLECTION_NAME, page, limit, filter);
     const meta = await db.collection(META_COLLECTION).doc('shipstation').get();
     const lastSync = meta.exists ? meta.data().lastSync : 0;
+    
     res.json({ ...result, lastSync });
+
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -178,33 +199,31 @@ app.get('/orders', async (req, res) => {
 
 app.get('/tracking', async (req, res) => {
   try {
+    // STRICT INTERCEPTION FOR ISSUES
+    if (req.query.status === 'Issues') {
+      return await handleIssuesRequest(res);
+    }
+
+    // Standard Logic for other statuses
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 25;
-    const statusFilter = req.query.status;
-    const isIssuesMode = statusFilter === 'Issues' || statusFilter === 'Exception';
+    const filter = (item) => {
+      const validTracking = item.trackingNumber && item.trackingNumber !== 'No Tracking';
+      if (!validTracking) return false;
+      
+      if (!req.query.status) return true;
+      const status = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
+      return status.includes(req.query.status.toLowerCase());
+    };
     
-    let result;
-    if (isIssuesMode) {
-        result = await getIssuesData(COLLECTION_NAME, page, limit);
-    } else {
-        const filter = (item) => {
-            const validTracking = item.trackingNumber && item.trackingNumber !== 'No Tracking';
-            if (!validTracking) return false;
-            
-            if (!statusFilter) return true;
-            const status = (item.upsStatus || item.status || item.orderStatus || "").toLowerCase();
-            return status.includes(statusFilter.toLowerCase());
-        };
-        result = await getPaginatedData(COLLECTION_NAME, page, limit, filter);
-    }
-    
+    const result = await getPaginatedData(COLLECTION_NAME, page, limit, filter);
     res.json(result);
+
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Persistent Flagging Endpoint
 app.post('/flag', async (req, res) => {
   const { trackingNumber, orderNumber, flagged } = req.body;
   if (!orderNumber) return res.status(400).send("Missing orderNumber");
@@ -233,13 +252,12 @@ app.post('/sync/orders', async (req, res) => {
       if (now - lastSync < SYNC_COOLDOWN_MS) {
         return res.json({ 
           success: true, 
-          message: "Cache is fresh. Skipping external ShipStation fetch.",
+          message: "Cache is fresh. Skipping external fetch.",
           nextSyncIn: Math.ceil((SYNC_COOLDOWN_MS - (now - lastSync)) / 60000)
         });
       }
     }
 
-    // Call our refined helper functions
     const rawOrders = await fetchLiveOrders();
     const mockOrders = rawOrders.map(s => cleanData(s, now));
 
@@ -251,7 +269,7 @@ app.post('/sync/orders', async (req, res) => {
 
     batch.set(metaRef, { lastSync: now }, { merge: true });
     await batch.commit();
-    res.json({ success: true, count: mockOrders.length, message: "Successfully synced with ShipStation" });
+    res.json({ success: true, count: mockOrders.length });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
